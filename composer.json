@@ -1,6 +1,6 @@
 {
-	"name" : "{{vendor}}/yii2-{{package}}",
-	"description" : "{{package}} Module for Portalium (Yii2)",
+	"name" : "portalium/yii2-auth",
+	"description" : "auth Module for Portalium (Yii2)",
 	"type" : "portalium-module",
 	"license": "MIT",
 	"homepage" : "https://portalium.dev",
@@ -12,11 +12,11 @@
 		}
 	],
 	"support" : {
-		"issues" : "https://github.com/{{vendor}}/yii2-{{package}}/issues"
+		"issues" : "https://github.com/portalium/yii2-auth/issues"
 	},
 	"autoload" : {
 		"psr-4" : {
-			"{{vendor}}\\{{package}}\\" : "src/"
+			"portalium\\auth\\" : "src/"
 		}
 	}
 }
