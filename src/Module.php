@@ -1,37 +1,37 @@
 <?php
 
-namespace {{vendor}}\{{package}};
+namespace portalium\auth;
 
 use portalium\base\Event;
-use {{vendor}}\{{package}}\components\TriggerActions;
+use portalium\auth\components\TriggerActions;
 
 class Module extends \portalium\base\Module
 {
-    public static $tablePrefix = '{{package}}_';
+    public static $tablePrefix = 'auth_';
     
-    public static $name = '{{package}}';
+    public static $name = 'auth';
 
-    public static $description = '{{package}} Module';
+    public static $description = 'auth Module';
 
     public $apiRules = [
         [
             'class' => 'yii\rest\UrlRule',
             'controller' => [
-                '{{package}}/default',
+                'auth/default',
             ]
         ],
     ];
     
     public static function moduleInit()
     {
-        self::registerTranslation('{{package}}','@{{vendor}}/{{package}}/messages',[
-            '{{package}}' => '{{package}}.php',
+        self::registerTranslation('auth','@portalium/auth/messages',[
+            'auth' => 'auth.php',
         ]);
     }
 
     public static function t($message, array $params = [])
     {
-        return parent::coreT('{{package}}', $message, $params);
+        return parent::coreT('auth', $message, $params);
     }
 
     /* 

@@ -11,7 +11,7 @@ Init Component File:
 ```php
 <?php
 
-namespace portalium\{{package}}\components;
+namespace portalium\auth\components;
 
 use Yii;
 use yii\base\Component;
@@ -35,7 +35,7 @@ public function registerComponents()
     {
         return [
             'setting' => [
-                'class' => 'portalium\{{package}}\components\{{Component}}',
+                'class' => 'portalium\auth\components\{{Component}}',
             ]
         ];
     }

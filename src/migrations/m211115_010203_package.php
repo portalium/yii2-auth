@@ -4,7 +4,7 @@ use yii\db\Schema;
 use yii\db\Migration;
 use portalium\user\Module as UserModule;
 
-class m211115_010203_{{package}} extends Migration
+class m211115_010203_auth extends Migration
 {
     /* 
         public function safeUp()
@@ -12,9 +12,9 @@ class m211115_010203_{{package}} extends Migration
             $tableOptions = 'ENGINE=InnoDB';
 
             $this->createTable(
-                '{{%' . Module::$tablePrefix . '{{package}}}}',
+                '{{%' . Module::$tablePrefix . 'auth}}',
                 [
-                    'id_{{package}}'=> $this->primaryKey(),
+                    'id_auth'=> $this->primaryKey(),
                     'name'=> $this->string(255)->notNull(),
                     'id_user'=> $this->integer(11)->notNull(),
                     'date_create'=> $this->datetime()->notNull()->defaultExpression("CURRENT_TIMESTAMP"),
@@ -23,15 +23,15 @@ class m211115_010203_{{package}} extends Migration
             );
             // creates index for column `id_user`
             $this->createIndex(
-                '{{%idx-' . Module::$tablePrefix . '{{package}}-id_user}}',
-                '{{%' . Module::$tablePrefix . '{{package}}}}',
+                '{{%idx-' . Module::$tablePrefix . 'auth-id_user}}',
+                '{{%' . Module::$tablePrefix . 'auth}}',
                 'id_user'
             );
 
             // add foreign key for table `{{%user}}`
             $this->addForeignKey(
-                '{{%fk-' . Module::$tablePrefix . '{{package}}-id_user}}',
-                '{{%' . Module::$tablePrefix . '{{package}}}}',
+                '{{%fk-' . Module::$tablePrefix . 'auth-id_user}}',
+                '{{%' . Module::$tablePrefix . 'auth}}',
                 'id_user',
                 '{{%' . UserModule::$tablePrefix . 'user}}',
                 'id_user',
@@ -41,7 +41,7 @@ class m211115_010203_{{package}} extends Migration
 
         public function safeDown()
         {
-            $this->dropTable('{{%' . Module::$tablePrefix . '{{package}}}}');
+            $this->dropTable('{{%' . Module::$tablePrefix . 'auth}}');
         }
     */
 }

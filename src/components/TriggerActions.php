@@ -1,6 +1,6 @@
 <?php
 
-namespace {{vendor}}\{{package}}\components;
+namespace portalium\auth\components;
 
 use Yii;
 use yii\base\BaseObject;
