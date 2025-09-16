@@ -1,0 +1,22 @@
+{
+	"name" : "{{vendor}}/yii2-{{package}}",
+	"description" : "{{package}} Module for Portalium (Yii2)",
+	"type" : "portalium-module",
+	"license": "MIT",
+	"homepage" : "https://portalium.dev",
+	"authors" : [
+		{
+			"name" : "Uğur YILDIZ",
+			"email" : "yildiz@diginova.com.tr",
+			"homepage" : "https://uguryildiz.net"
+		}
+	],
+	"support" : {
+		"issues" : "https://github.com/{{vendor}}/yii2-{{package}}/issues"
+	},
+	"autoload" : {
+		"psr-4" : {
+			"{{vendor}}\\{{package}}\\" : "src/"
+		}
+	}
+}
