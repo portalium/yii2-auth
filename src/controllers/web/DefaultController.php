@@ -44,7 +44,7 @@ class DefaultController extends WebController
                     ],
                     [
                         'actions' => ['index', 'login', 'login-google', 'callback-google', 'login-apple', 'callback-apple','signup', 
-        'request-password-reset', 'reset-password'],
+                        'request-password-reset', 'reset-password', 'resend-verification-email', 'verify-email'],
                         'allow' => true,
                         'roles' => ['?'],
                     ],

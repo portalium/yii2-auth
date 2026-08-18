@@ -5,7 +5,7 @@ use portalium\site\helpers\Route;
 /** @var yii\web\View $this */
 /** @var common\models\User $user */
 
-$verifyLink = Route::createUrlWeb('auth/auth/verify-email' , [ 'token' => $user->verification_token]);
+$verifyLink = Route::createUrlWeb('auth/default/verify-email' , [ 'token' => $user->verification_token]);
 ?>
     Hello <?= $user->username ?>,
 
