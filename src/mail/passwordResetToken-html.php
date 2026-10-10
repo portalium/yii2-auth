@@ -3,7 +3,7 @@
 use yii\helpers\Html;
 use portalium\auth\Module;
 
-$resetLink = Yii::$app->urlManager->createAbsoluteUrl(['auth/auth/reset-password', 'token' => $user->password_reset_token]);
+$resetLink = Yii::$app->urlManager->createAbsoluteUrl(['auth/default/reset-password', 'token' => $user->password_reset_token]);
 ?>
 <div class="password-reset">
     <p><?= Module::t('Hello {username},',['username' => Html::encode($user->username)]) ?></p>
