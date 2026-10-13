@@ -15,6 +15,7 @@ use portalium\auth\components\OAuthClient;
 use portalium\auth\components\AppleJWTHelper;
 use portalium\auth\models\PasswordResetRequestForm;
 use portalium\auth\models\ResetPasswordForm;
+use portalium\helpers\RestHelper;
 use yii\base\InvalidParamException;
 use yii\rest\Controller;
 
@@ -268,13 +269,13 @@ class DefaultController extends Controller
                         'success' => true
                     ];
                 } else {
-                    return $this->error(['PasswordReset' => 'Sorry, we are unable to reset password for the provided email address.']);
+                    return RestHelper::error(['PasswordReset' => 'Sorry, we are unable to reset password for the provided email address.']);
                 }
             } else {
-                return $this->modelError($model);
+                return RestHelper::modelError($model);
             }
         } else {
-            return $this->error(['PasswordResetRequest' => 'Email (email) is required.']);
+            return RestHelper::error(['PasswordResetRequest' => 'Email (email) is required.']);
         }
     }
 
@@ -286,21 +287,21 @@ class DefaultController extends Controller
     public function actionResetPassword()
     {
         $bodyParams = Yii::$app->request->getBodyParams();
-        $token = $bodyParams['token'] ?? null;
-        $password = $bodyParams['password'] ?? null;
+        $token = $bodyParams['token'] ?? Yii::$app->request->get('token');
+        $password = $bodyParams['password'] ?? Yii::$app->request->get('password');
 
         if (!$token) {
-            return $this->error(['ResetPassword' => 'Token (token) is required.']);
+            return RestHelper::error(['ResetPassword' => 'Token (token) is required.']);
         }
 
         if (!$password) {
-            return $this->error(['ResetPassword' => 'Password (password) is required.']);
+            return RestHelper::error(['ResetPassword' => 'Password (password) is required.']);
         }
 
         try {
             $model = new ResetPasswordForm($token);
         } catch (InvalidParamException $e) {
-            return $this->error(['ResetPassword' => $e->getMessage()]);
+            return RestHelper::error(['ResetPassword' => $e->getMessage()]);
         }
 
         $model->password = $password;
@@ -310,7 +311,7 @@ class DefaultController extends Controller
                 'success' => true
             ];
         } else {
-            return $this->modelError($model);
+            return RestHelper::modelError($model);
         }
     }
 
