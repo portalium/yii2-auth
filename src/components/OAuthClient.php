@@ -60,10 +60,8 @@ class OAuthClient extends Component
             // Try Google_Client verification with each allowed client ID
             $verifiedPayload = $this->verifyWithGoogleClient($idToken, $allowedClientIds);
             
-            if (!$verifiedPayload) {
-                // Fallback: Manual verification if Google_Client fails
-                $verifiedPayload = $this->manualTokenVerification($payload, $allowedClientIds);
-            }
+            // A token whose signature Google cannot verify is not accepted; an unsigned "manual
+            // verification" fallback used to let a forged token take over an account.
 
             if (!$verifiedPayload) {
                 Yii::error('Token verification failed with all methods', 'oauth');
@@ -109,8 +107,7 @@ class OAuthClient extends Component
     {
         foreach ($clientIds as $clientId) {
             try {
-                $client = new Google_Client();
-                $client->setClientId($clientId);
+                $client = $this->createGoogleClient($clientId);
                 
                 $originalErrorReporting = error_reporting();
                 error_reporting($originalErrorReporting & ~E_DEPRECATED);
@@ -143,40 +140,15 @@ class OAuthClient extends Component
     }
 
     /**
-     * Manual token verification as fallback
-     * @param array $payload
-     * @param array $clientIds
-     * @return array|false
+     * Creates a Google_Client; overridden in a subclass in tests to avoid hitting the network.
+     * @param string $clientId
+     * @return Google_Client
      */
-    private function manualTokenVerification($payload, $clientIds)
+    protected function createGoogleClient($clientId)
     {
-        // Check basic token structure and claims
-        if (empty($payload['sub']) || empty($payload['email'])) {
-            Yii::error('Missing required fields (sub, email) in token payload', 'oauth');
-            return false;
-        }
-
-        // Verify issuer
-        if (($payload['iss'] ?? '') !== 'https://accounts.google.com') {
-            Yii::error('Invalid token issuer: ' . ($payload['iss'] ?? 'missing'), 'oauth');
-            return false;
-        }
-
-        // Verify audience is in allowed list
-        $tokenAudience = $payload['aud'] ?? '';
-        if (!in_array($tokenAudience, $clientIds)) {
-            Yii::error("Token audience not in allowed list: {$tokenAudience}", 'oauth');
-            return false;
-        }
-
-        // Verify expiration (with 5-minute tolerance)
-        if (($payload['exp'] ?? 0) < (time() - 300)) {
-            Yii::error('Token expired', 'oauth');
-            return false;
-        }
-
-        Yii::info("Token manually verified for audience: {$tokenAudience}", 'oauth');
-        return $payload;
+        $client = new Google_Client();
+        $client->setClientId($clientId);
+        return $client;
     }
 
     /**
