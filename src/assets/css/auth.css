@@ -433,13 +433,17 @@
     text-decoration: underline;
 }
 
-/* Already logged-in notice (signup page) */
+/* Notice box: status message on the login card (alert-*) and the already logged-in note (signup page).
+   The neutral grey colours apply only to the plain note, so alert-* colours stay visible. */
 .auth-notice {
     border-radius: 0.5rem;
-    border: 1px solid #e2e8f0;
-    background-color: #f8fafc;
     padding: 1rem;
     text-align: center;
+}
+
+.auth-notice:not(.alert) {
+    border: 1px solid #e2e8f0;
+    background-color: #f8fafc;
     color: #475569;
 }
 
