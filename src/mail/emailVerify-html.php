@@ -2,7 +2,6 @@
 
 use portalium\site\helpers\Route;
 use yii\helpers\Html;
-use Yii;
 use yii\helpers\Url;
 
 /** @var yii\web\View $this */
