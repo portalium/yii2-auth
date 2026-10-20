@@ -3,10 +3,13 @@
 use yii\helpers\Html;
 use portalium\theme\widgets\ActiveForm;
 use portalium\auth\Module;
+use portalium\auth\models\SignupForm;
 use portalium\auth\bundles\AuthAsset;
 use portalium\theme\bundles\IconAsset;
 
 $this->title = Module::t('Signup');
+$lockedEmail = $model->signedInvitationEmail();
+$emailLock = $lockedEmail === null ? [] : ['readonly' => true, 'value' => $lockedEmail];
 
 $authBundle = AuthAsset::register($this);
 $iconBundle = IconAsset::register($this);
@@ -92,7 +95,7 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
                 'linkedin' => 'LinkedIn',
                 'twitter' => 'Twitter',
             ];
-            $hasSocial = false;
+            $enabledProviders = [];
             foreach ($providers as $key => $label) {
                 try {
                     $isEnabled = Yii::$app->setting->getValue('auth::' . $key . 'Enabled');
@@ -100,13 +103,17 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
                     $isEnabled = false;
                 }
                 if ($isEnabled) {
-                    $hasSocial = true;
-                    echo Html::a(
-                        Html::img($authBundle->baseUrl . '/icons/' . $key . '.svg', ['alt' => $label . ' icon', 'class' => 'auth-icon-xs']) . ' ' . Module::t('Continue with {provider}', ['provider' => $label]),
-                        ['/auth/default/login-' . $key],
-                        ['class' => 'auth-sl-btn-social mb-2']
-                    );
+                    $enabledProviders[$key] = $label;
                 }
+            }
+            $hasSocial = $enabledProviders !== [];
+            echo $this->render('_invitation_hint', ['hint' => $model->invitationHint(), 'hasSocial' => $hasSocial, 'signed' => $lockedEmail !== null]);
+            foreach ($enabledProviders as $key => $label) {
+                echo Html::a(
+                    Html::img($authBundle->baseUrl . '/icons/' . $key . '.svg', ['alt' => $label . ' icon', 'class' => 'auth-icon-xs']) . ' ' . Module::t('Continue with {provider}', ['provider' => $label]),
+                    ['/auth/default/login-' . $key],
+                    ['class' => 'auth-sl-btn-social mb-2']
+                );
             }
             ?>
             <?php if ($hasSocial): ?>
@@ -117,6 +124,7 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
             </div>
             <?php endif; ?>
             <!-- Signup Form -->
+            <?= $this->render('_notice') ?>
             <?php $form = ActiveForm::begin([
                 'id' => 'form-signup',
                 'fieldConfig' => [
@@ -124,6 +132,12 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
                     'labelOptions' => ['class' => 'auth-sl-label'],
                 ],
             ]); ?>
+            <?php if ($model->invitationToken() !== '') : ?>
+                <?= Html::activeHiddenInput($model, 'invitation', ['value' => $model->invitationToken()]) ?>
+            <?php endif; ?>
+            <?php if ($model->invitationSignature() !== '') : ?>
+                <?= Html::activeHiddenInput($model, 'sig', ['value' => $model->invitationSignature()]) ?>
+            <?php endif; ?>
             <div class="d-flex gap-2 mb-1">
                 <div class="flex-grow-1">
                     <?= $form->field($model, 'first_name', ['options' => ['class' => 'mb-1']])->textInput([
@@ -146,7 +160,7 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
             <?= $form->field($model, 'email', ['options' => ['class' => 'mb-1']])->textInput([
                 'class' => 'auth-sl-input',
                 'placeholder' => Module::t('name@company.com'),
-            ]) ?>
+            ] + $emailLock)->hint($lockedEmail === null ? null : Module::t('This is the address the invitation was sent to; it cannot be changed.')) ?>
             <?= $form->field($model, 'password', ['options' => ['class' => 'mb-1']])->passwordInput([
                 'class' => 'auth-sl-input',
                 'placeholder' => '••••••••',
@@ -165,6 +179,7 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
             <?= Html::submitButton(Module::t('Sign up'), [
                 'class' => 'btn bg-white border border-2 border-success text-dark fw-bold w-100 mb-2',
                 'name' => 'signup-button',
+                'disabled' => SignupForm::signupBlocked(),
                 'style' => 'border-radius: 0.375rem; padding: 0.7rem 1rem; font-size: 1rem;',
             ]) ?>
             <?php ActiveForm::end(); ?>
@@ -257,7 +272,7 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
                 'linkedin' => 'LinkedIn',
                 'twitter' => 'Twitter',
             ];
-            $hasSocial = false;
+            $enabledProviders = [];
             foreach ($providers as $key => $label) {
                 try {
                     $isEnabled = Yii::$app->setting->getValue('auth::' . $key . 'Enabled');
@@ -265,13 +280,17 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
                     $isEnabled = false;
                 }
                 if ($isEnabled) {
-                    $hasSocial = true;
-                    echo Html::a(
-                        Html::img($authBundle->baseUrl . '/icons/' . $key . '.svg', ['alt' => $label . ' icon', 'class' => 'auth-icon-xs']) . ' ' . Module::t('Continue with {provider}', ['provider' => $label]),
-                        ['/auth/default/login-' . $key],
-                        ['class' => 'auth-btn-social mb-3']
-                    );
+                    $enabledProviders[$key] = $label;
                 }
+            }
+            $hasSocial = $enabledProviders !== [];
+            echo $this->render('_invitation_hint', ['hint' => $model->invitationHint(), 'hasSocial' => $hasSocial, 'signed' => $lockedEmail !== null]);
+            foreach ($enabledProviders as $key => $label) {
+                echo Html::a(
+                    Html::img($authBundle->baseUrl . '/icons/' . $key . '.svg', ['alt' => $label . ' icon', 'class' => 'auth-icon-xs']) . ' ' . Module::t('Continue with {provider}', ['provider' => $label]),
+                    ['/auth/default/login-' . $key],
+                    ['class' => 'auth-btn-social mb-3']
+                );
             }
             ?>
             <?php if ($hasSocial): ?>
@@ -281,6 +300,7 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
                 <div class="auth-divider-line"></div>
             </div>
             <?php endif; ?>
+            <?= $this->render('_notice') ?>
             <?php $form = ActiveForm::begin([
                 'id' => 'form-signup',
                 'fieldConfig' => [
@@ -288,6 +308,12 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
                     'labelOptions' => ['class' => 'auth-label'],
                 ],
             ]); ?>
+            <?php if ($model->invitationToken() !== '') : ?>
+                <?= Html::activeHiddenInput($model, 'invitation', ['value' => $model->invitationToken()]) ?>
+            <?php endif; ?>
+            <?php if ($model->invitationSignature() !== '') : ?>
+                <?= Html::activeHiddenInput($model, 'sig', ['value' => $model->invitationSignature()]) ?>
+            <?php endif; ?>
             <div class="d-flex gap-3">
                 <div class="flex-grow-1">
                     <?= $form->field($model, 'first_name')->textInput([
@@ -310,7 +336,7 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
             <?= $form->field($model, 'email')->textInput([
                 'class' => 'auth-input auth-input-sm',
                 'placeholder' => Module::t('name@company.com'),
-            ]) ?>
+            ] + $emailLock)->hint($lockedEmail === null ? null : Module::t('This is the address the invitation was sent to; it cannot be changed.')) ?>
             <?= $form->field($model, 'password')->passwordInput([
                 'class' => 'auth-input auth-input-sm',
                 'placeholder' => '••••••••',
@@ -330,6 +356,7 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
                 <?= Html::submitButton(Module::t('Create Account'), [
                     'class' => 'btn btn-outline-success auth-btn auth-btn-sm',
                     'name' => 'signup-button',
+                    'disabled' => SignupForm::signupBlocked(),
                 ]) ?>
             </div>
             <?php ActiveForm::end(); ?>
