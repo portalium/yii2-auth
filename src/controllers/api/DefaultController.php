@@ -5,6 +5,7 @@ namespace portalium\auth\controllers\api;
 use Exception;
 use Yii;
 use yii\filters\ContentNegotiator;
+use yii\filters\auth\HttpBearerAuth;
 use yii\filters\Cors;
 use yii\filters\RateLimiter;
 use yii\web\Response;
@@ -13,6 +14,9 @@ use portalium\auth\models\SignupForm;
 use portalium\user\models\User;
 use portalium\auth\components\OAuthClient;
 use portalium\auth\components\AppleJWTHelper;
+use portalium\auth\components\AccountStatus;
+use portalium\auth\components\ApiAccess;
+use portalium\auth\components\OAuthAccount;
 use portalium\auth\models\PasswordResetRequestForm;
 use portalium\auth\models\ResetPasswordForm;
 use yii\base\InvalidParamException;
@@ -47,6 +51,14 @@ class DefaultController extends Controller
             ],
         ];
 
+        // profile: Bearer API key authentication; the `novavision login` CLI uses this
+        $behaviors['authenticator'] = [
+            'class' => HttpBearerAuth::class,
+            'only' => ['profile'],
+        ];
+        // The CORS preflight (OPTIONS) must be answered before authentication runs
+        $behaviors = ['corsFilter' => $behaviors['corsFilter']] + $behaviors;
+
         // Rate limiting for API endpoints
         $behaviors['rateLimiter'] = [
             'class' => RateLimiter::class,
@@ -63,23 +75,25 @@ class DefaultController extends Controller
      */
     public function actionLogin()
     {
+        if (!ApiAccess::loginAllowed()) {
+            return $this->disabled(ApiAccess::LOGIN_DISABLED, ApiAccess::loginDisabledMessage());
+        }
         $model = new LoginForm();
-        
+
         if ($model->load(Yii::$app->request->getBodyParams(), '') && $model->login()) {
-            $user = Yii::$app->user->identity;
-            
             return [
                 'success' => true,
+                'status' => AccountStatus::ACTIVE,
                 'message' => 'Login successful',
-                'user' => [
-                    'id' => $user->id,
-                    'email' => $user->email,
-                    'username' => $user->username,
-                    'first_name' => $user->first_name,
-                    'last_name' => $user->last_name,
-                    'access_token' => $user->access_token,
-                ]
+                'user' => $this->userFields(Yii::$app->user->identity, true),
             ];
+        }
+
+        if ($model->getAccountStatus() !== null) {
+            Yii::$app->response->statusCode = 403;
+            $message = (string) $model->getAccountMessage();
+            return ['success' => false] + $this->statusFields($model->getAccountStatus(), $message)
+                + ['errors' => ['password' => [$message]]];
         }
 
         Yii::$app->response->statusCode = 401;
@@ -91,34 +105,31 @@ class DefaultController extends Controller
     }
 
     /**
-     * Register new user
-     * 
+     * Register new user.
+     * The "invitation" body param is the invitation link's token (decision 28); signing up with the invited
+     * address activates the account immediately.
+     *
      * @return array
      */
     public function actionSignup()
     {
+        if (!ApiAccess::signupAllowed()) {
+            return $this->disabled(ApiAccess::SIGNUP_DISABLED, ApiAccess::signupDisabledMessage());
+        }
         $model = new SignupForm();
-        
-        if ($model->load(Yii::$app->request->getBodyParams(), '') && ($user = $model->signup())) {
-            // Auto-activate for mobile registrations
-            $user->status = User::STATUS_ACTIVE;
-            $user->email_verify = User::EMAIL_VERIFY;
-            $user->save(false);
-            
-            // Auto-login after signup
-            Yii::$app->user->login($user, 3600 * 24 * 30); // 30 days
-            
+
+        if ($model->load(Yii::$app->request->getBodyParams(), '') && ($user = $model->signup(false))) {
+            if ((int) $user->status !== User::STATUS_ACTIVE) {
+                return ['success' => true] + $this->inactiveFields($user) + ['user' => $this->userFields($user, false)];
+            }
+
+            Yii::$app->user->login($user, 3600 * 24 * 30);
+
             return [
                 'success' => true,
+                'status' => AccountStatus::ACTIVE,
                 'message' => 'Registration successful',
-                'user' => [
-                    'id' => $user->id,
-                    'email' => $user->email,
-                    'username' => $user->username,
-                    'first_name' => $user->first_name,
-                    'last_name' => $user->last_name,
-                    'access_token' => $user->access_token,
-                ]
+                'user' => $this->userFields($user, true),
             ];
         }
 
@@ -138,6 +149,9 @@ class DefaultController extends Controller
      */
     public function actionGoogleSignin()
     {
+        if (!ApiAccess::loginAllowed()) {
+            return $this->disabled(ApiAccess::LOGIN_DISABLED, ApiAccess::loginDisabledMessage());
+        }
         $idToken = Yii::$app->request->getBodyParam('id_token');
         if (empty($idToken)) {
             Yii::$app->response->statusCode = 400;
@@ -148,7 +162,8 @@ class DefaultController extends Controller
         }
 
         try {
-            $client = new OAuthClient([
+            $client = Yii::createObject([
+                'class' => OAuthClient::class,
                 'clientId' => Yii::$app->setting->getValue('auth::googleClientId'),
                 'clientIds' => [
                     Yii::$app->setting->getValue('auth::googleClientId'),
@@ -186,6 +201,9 @@ class DefaultController extends Controller
      */
     public function actionAppleSignin()
     {
+        if (!ApiAccess::loginAllowed()) {
+            return $this->disabled(ApiAccess::LOGIN_DISABLED, ApiAccess::loginDisabledMessage());
+        }
         $idToken = Yii::$app->request->getBodyParam('id_token');
         $userParam = Yii::$app->request->getBodyParam('user');
         
@@ -245,8 +263,8 @@ class DefaultController extends Controller
                 'username' => $user->username,
                 'first_name' => $user->first_name,
                 'last_name' => $user->last_name,
-                'created_at' => $user->created_at,
-                'updated_at' => $user->updated_at,
+                'created_at' => $user->date_create,
+                'updated_at' => $user->date_update,
             ]
         ];
     }
@@ -262,9 +280,9 @@ class DefaultController extends Controller
         
         if ($model->load(Yii::$app->request->getBodyParams(), '')) {
             if ($model->validate()) {
-                if ($model->sendEmail()) {
+                if ($model->request()) {
                     return [
-                        'message' => 'Check your email for further instructions.',
+                        'message' => PasswordResetRequestForm::sentMessage(),
                         'success' => true
                     ];
                 } else {
@@ -323,7 +341,8 @@ class DefaultController extends Controller
      */
     private function processAppleIdToken($idToken, $userParam = null)
     {
-        $appleHelper = new AppleJWTHelper([
+        $appleHelper = Yii::createObject([
+            'class' => AppleJWTHelper::class,
             'teamId' => Yii::$app->setting->getValue('auth::appleTeamId'),
             'keyId' => Yii::$app->setting->getValue('auth::appleKeyId'),
             'clientId' => Yii::$app->setting->getValue('auth::appleClientId'),
@@ -337,7 +356,7 @@ class DefaultController extends Controller
         $userData = [
             'apple_id' => $tokenData['sub'] ?? null,
             'email' => $tokenData['email'],
-            'email_verified' => true,
+            'email_verified' => $tokenData['email_verified'] ?? false,
             'name' => '',
             'given_name' => '',
             'family_name' => '',
@@ -357,71 +376,109 @@ class DefaultController extends Controller
     }
 
     /**
-     * Process OAuth authentication (login/signup)
-     * 
+     * Sign in or sign up via Google/Apple (OAuthAccount). A new account follows the auth::user_status setting;
+     * an inactive account is never signed in and gets no access_token. A newly created account returns 200 +
+     * "pending_approval"; an existing inactive account returns 403.
+     *
      * @param array $userData
      * @param string $provider
      * @return array
      */
     private function processOAuthAuthentication($userData, $provider)
     {
-        $email = $userData['email'];
-        
-        $user = User::findOne(['email' => $email, 'status' => User::STATUS_ACTIVE]);
-        
-        if ($user) {
-            Yii::$app->user->login($user, 3600 * 24 * 30); // 30 days
-
+        $account = OAuthAccount::resolve($userData, ApiAccess::signupAllowed());
+        $user = $account->user;
+        $refusals = [
+            OAuthAccount::REASON_EMAIL_NOT_VERIFIED => OAuthAccount::REASON_EMAIL_NOT_VERIFIED,
+            OAuthAccount::REASON_SIGNUP_DISABLED => ApiAccess::SIGNUP_DISABLED,
+        ];
+        if ($user === null && isset($refusals[$account->reason])) {
+            Yii::$app->response->statusCode = 403;
             return [
-                'success' => true,
-                'message' => 'Login successful with ' . $provider,
+                'success' => false,
+                'status' => $refusals[$account->reason],
+                'message' => (string) $account->message,
+                'errors' => $account->errors,
                 'is_new_user' => false,
-                'user' => [
-                    'id' => $user->id,
-                    'email' => $user->email,
-                    'username' => $user->username,
-                    'first_name' => $user->first_name,
-                    'last_name' => $user->last_name,
-                    'access_token' => Yii::$app->user->identity->access_token,
-                ]
             ];
-        } else {
-            $model = new SignupForm();
-            $model->username = explode('@', $email)[0];
-            $model->email = $email;
-            $model->password = Yii::$app->security->generateRandomString(12);
-            $model->password_confirm = $model->password;
-            $model->first_name = $userData['given_name'] ?? '';
-            $model->last_name = $userData['family_name'] ?? '';
-            
-            if ($newUser = $model->signup()) {
-                $newUser->status = User::STATUS_ACTIVE;
-                $newUser->email_verify = User::EMAIL_VERIFY;
-                $newUser->save(false);
-                
-                Yii::$app->user->login($newUser, 3600 * 24 * 30);
-                
-                return [
-                    'success' => true,
-                    'message' => 'Account created and logged in with ' . $provider,
-                    'is_new_user' => true,
-                    'user' => [
-                        'id' => $newUser->id,
-                        'email' => $newUser->email,
-                        'username' => $newUser->username,
-                        'first_name' => $newUser->first_name,
-                        'last_name' => $newUser->last_name,
-                        'access_token' => Yii::$app->user->identity->access_token,
-                    ]
-                ];
-            } else {
-                Yii::$app->response->statusCode = 500;
-                return [
-                    'success' => false,
-                    'message' => 'Failed to create user account',
-                    'errors' => $model->getErrors()
-                ];
-            }
         }
+        if ($user === null) {
+            Yii::$app->response->statusCode = 500;
+            return [
+                'success' => false,
+                'message' => 'Failed to create user account',
+                'errors' => $account->errors,
+            ];
+        }
+
+        if ((int) $user->status !== User::STATUS_ACTIVE) {
+            if (!$account->isNew) {
+                Yii::$app->response->statusCode = 403;
+                return ['success' => false] + $this->inactiveFields($user) + ['is_new_user' => false];
+            }
+            return ['success' => true] + $this->inactiveFields($user)
+                + ['is_new_user' => true, 'user' => $this->userFields($user, false)];
+        }
+
+        Yii::$app->user->login($user, 3600 * 24 * 30);
+
+        return [
+            'success' => true,
+            'status' => AccountStatus::ACTIVE,
+            'message' => $account->isNew ? 'Account created and logged in with ' . $provider : 'Login successful with ' . $provider,
+            'is_new_user' => $account->isNew,
+            'user' => $this->userFields($user, true),
+        ];
+    }
+
+    /**
+     * API signup or login disabled via setting (decision 18): 403 + machine-readable status + message.
+     */
+    private function disabled(string $status, string $message): array
+    {
+        Yii::$app->response->statusCode = 403;
+
+        return ['success' => false, 'status' => $status, 'message' => $message];
+    }
+
+    /**
+     * Response fields for an inactive account (see statusFields).
+     */
+    private function inactiveFields(User $user): array
+    {
+        return $this->statusFields(AccountStatus::of($user), AccountStatus::inactiveMessage($user));
+    }
+
+    /**
+     * Machine-readable status (AccountStatus constants) and the user-facing message. A pending account also
+     * returns auth::approval_contact (null if empty); the message already includes that address.
+     */
+    private function statusFields(string $status, string $message): array
+    {
+        $fields = ['status' => $status, 'message' => $message];
+        if ($status === AccountStatus::PENDING_APPROVAL) {
+            $fields['approval_contact'] = AccountStatus::approvalContact();
+        }
+
+        return $fields;
+    }
+
+    /**
+     * User fields in the response; access_token is only included for an active account that is signed in.
+     */
+    private function userFields(User $user, bool $withToken): array
+    {
+        $fields = [
+            'id' => $user->id,
+            'email' => $user->email,
+            'username' => $user->username,
+            'first_name' => $user->first_name,
+            'last_name' => $user->last_name,
+        ];
+        if ($withToken) {
+            $fields['access_token'] = $user->access_token;
+        }
+
+        return $fields;
     }
 }

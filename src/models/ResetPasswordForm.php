@@ -3,7 +3,7 @@
 namespace portalium\auth\models;
 
 use yii\base\Model;
-use yii\base\InvalidParamException;
+use yii\base\InvalidArgumentException;
 use portalium\auth\Module;
 use portalium\user\models\User;
 
@@ -16,11 +16,11 @@ class ResetPasswordForm extends Model
     public function __construct($token, $config = [])
     {
         if (empty($token) || !is_string($token)) {
-            throw new InvalidParamException(Module::t('Password reset token cannot be blank.'));
+            throw new InvalidArgumentException(Module::t('Password reset token cannot be blank.'));
         }
         $this->_user = User::findByPasswordResetToken($token);
         if (!$this->_user) {
-            throw new InvalidParamException(Module::t('Wrong password reset token.'));
+            throw new InvalidArgumentException(Module::t('Wrong password reset token.'));
         }
         parent::__construct($config);
     }

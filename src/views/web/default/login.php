@@ -131,6 +131,7 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
         <div class="bg-white rounded-4 shadow-lg px-4 py-4" style="min-width:320px;max-width:400px;width:100%;">
             <h3 class="card-title text-center mb-1 fw-bold text-dark">Log in to Command Center</h3>
             <p class="text-center text-muted mb-3"><?= Html::encode($_formSubtitle) ?></p>
+            <?= $this->render('_notice') ?>
             <!-- Social Providers -->
             <?php
             $providers = [
@@ -309,6 +310,7 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
                 <h2 class="auth-form-title"><?= Html::encode($_formTitle) ?></h2>
                 <p class="auth-form-subtitle"><?= Html::encode($_formSubtitle) ?></p>
             </div>
+            <?= $this->render('_notice') ?>
             <?php $form = ActiveForm::begin([
                 'id' => 'login-form',
                 'fieldConfig' => [

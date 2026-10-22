@@ -3,8 +3,8 @@
 namespace portalium\auth\controllers\web;
 
 use Exception;
-use InvalidArgumentException;
-use portalium\site\models\ResendVerificationEmailForm;
+use yii\base\InvalidArgumentException;
+use portalium\auth\models\ResendVerificationEmailForm;
 use Yii;
 use portalium\auth\Module;
 use yii\filters\AccessControl;
@@ -17,6 +17,9 @@ use portalium\auth\models\ResetPasswordForm;
 use portalium\web\Controller as WebController;
 use portalium\auth\models\PasswordResetRequestForm;
 use portalium\auth\models\VerifyEmailForm;
+use portalium\auth\components\AuthNotice;
+use portalium\auth\components\AccountStatus;
+use portalium\auth\components\OAuthAccount;
 use portalium\auth\components\OAuthClient;
 use portalium\auth\components\AppleJWTHelper;
 
@@ -36,6 +39,12 @@ class DefaultController extends WebController
         return [
             'access' => [
                 'class' => AccessControl::class,
+                'denyCallback' => function ($rule, $action) {
+                    if (!Yii::$app->user->isGuest) {
+                        return $this->goHome();
+                    }
+                    return $this->redirect(['/auth/default/login']);
+                },
                 'rules' => [
                     [
                         'actions' => ['logout'],
@@ -44,9 +53,13 @@ class DefaultController extends WebController
                     ],
                     [
                         'actions' => ['index', 'login', 'login-google', 'callback-google', 'login-apple', 'callback-apple','signup', 
-        'request-password-reset', 'reset-password'],
+                        'request-password-reset', 'reset-password', 'resend-verification-email', 'verify-email'],
                         'allow' => true,
                         'roles' => ['?'],
+                    ],
+                    [
+                        'actions' => ['verify-email', 'resend-verification-email'],
+                        'allow' => true,
                     ],
                 ],
             ],
@@ -115,11 +128,16 @@ class DefaultController extends WebController
                 Yii::$app->session->set('lang', Yii::$app->setting->getValue('app::language'));
             }
             return $this->goBack();
-        } else {
-            return $this->render('login', [
-                'model' => $model,
-            ]);
         }
+        if ($model->getAccountStatus() !== null) {
+            $type = $model->getAccountStatus() === AccountStatus::INACTIVE ? 'warning' : 'info';
+            AuthNotice::set($type, (string) $model->getAccountMessage());
+            $model->password = '';
+        }
+
+        return $this->render('login', [
+            'model' => $model,
+        ]);
     }
 
     /**
@@ -166,7 +184,8 @@ class DefaultController extends WebController
                 return $this->redirect(['/auth/default/login']);
             }
 
-            $client = new OAuthClient([
+            $client = Yii::createObject([
+                'class' => OAuthClient::class,
                 'clientId' => Yii::$app->setting->getValue('auth::googleClientId'),
                 'provider' => 'google',
             ]);
@@ -260,45 +279,50 @@ class DefaultController extends WebController
     }
 
     /**
-     * Verify user email address with token
+     * Verify user email address with token.
+     * Open to guests. The user's status follows auth::user_status (decision 25): Active logs a guest in,
+     * Passive waits for administrator approval. An invalid or used link never yields a server error.
      * @param string $token Verification token
      * @return \yii\web\Response
-     * @throws BadRequestHttpException
      */
     public function actionVerifyEmail($token)
     {
         try {
-            $model = new VerifyEmailForm($token);
+            $user = (new VerifyEmailForm($token))->verifyEmail();
         } catch (InvalidArgumentException $e) {
-            throw new BadRequestHttpException($e->getMessage());
+            $user = null;
         }
 
-        if (($user = $model->verifyEmail()) && Yii::$app->user->login($user)) {
-            $userId = Yii::$app->user->id;
-            $userModel = User::findOne($userId);
-            $userModel->email_verify = User::EMAIL_VERIFY;
-            $userModel->status = Yii::$app->setting->getValue('auth::user_status');
-            $userModel->save();
-
-            return $this->goHome();
+        if ($user === null) {
+            AuthNotice::set('warning', Module::t('This verification link is invalid or has already been used.') . ' '
+                . Module::t('Your account may already be verified: try signing in. If it is not, signing in will send you a new link.'));
+            return $this->redirect(['/auth/default/login']);
         }
-        Yii::$app->session->setFlash('error', 'Sorry, we are unable to verify your account with provided token.');
+
+        if ((int) $user->status !== User::STATUS_ACTIVE) {
+            AuthNotice::set('info', AccountStatus::approvalMessage(true));
+            return $this->redirect(['/auth/default/login']);
+        }
+
+        Yii::$app->session->addFlash('success', Module::t('Your email has been verified.'));
+        if (Yii::$app->user->isGuest) {
+            Yii::$app->user->login($user);
+        }
         return $this->goHome();
     }
 
     /**
-     * Resend email verification link
+     * Resend email verification link.
+     * Open to guests; the response is the same whether or not an account exists for the address.
      * @return string|\yii\web\Response
      */
     public function actionResendVerificationEmail()
     {
         $model = new ResendVerificationEmailForm();
         if ($model->load(Yii::$app->request->post()) && $model->validate()) {
-            if ($model->sendEmail()) {
-                Yii::$app->session->setFlash('success', 'Check your email for further instructions.');
-                return $this->goHome();
-            }
-            Yii::$app->session->setFlash('error', 'Sorry, we are unable to resend verification email for the provided email address.');
+            $model->sendEmail();
+            AuthNotice::set('info', Module::t('If an unverified account exists for this address, a new verification link has been sent.'));
+            return $this->redirect(['/auth/default/login']);
         }
 
         return $this->render('resendVerificationEmail', [
@@ -317,19 +341,48 @@ class DefaultController extends WebController
     }
 
     /**
-     * Display signup form and handle registration
+     * Display signup form and handle registration.
+     * A signup that arrives from an invitation link (?invitation=<token>, decision 28) carries the token in a
+     * hidden form field; a user who signs up with the invited address is activated immediately, signed in, and
+     * sent to the invitation page so they can click [Join]. A signup that is activated immediately but does not
+     * match an invitation returns to the page it came from (e.g. the invitation page) instead (final review U2).
+     * If reCAPTCHA is enabled but no secret key is configured, this is announced when the page loads and [Sign
+     * up] is disabled (U11). Immediate activation only happens via the signed link in the email
+     * (?invitation=<token>&sig=<signature>, decision 35/49); the signature is also carried in a hidden field.
+     * While auth::web_signup is off (Hide), signup is only possible through a valid signed invitation link; an
+     * unsigned request is redirected to the home page (decision 40).
      * @return string|\yii\web\Response
      */
     public function actionSignup()
     {
-        if (Yii::$app->setting->getValue('auth::web_signup')) {
-            $model = new SignupForm();
-            if ($model->load(Yii::$app->request->post())) {
+        $model = new SignupForm(['scenario' => SignupForm::SCENARIO_WEB]);
+        foreach (['invitation', 'sig'] as $param) {
+            $value = Yii::$app->request->get($param);
+            if (is_string($value)) {
+                $model->$param = $value;
+            }
+        }
+        $posted = $model->load(Yii::$app->request->post());
+        if (Yii::$app->setting->getValue('auth::web_signup') || $model->invitationSigned()) {
+            if ($posted) {
                 if ($user = $model->signup()) {
-                    if (Yii::$app->getUser()->login($user)) {
-                        return $this->goHome();
+                    if ((int) $user->status === User::STATUS_ACTIVE && Yii::$app->getUser()->login($user)) {
+                        if ($model->invitationMatched()) {
+                            return $this->redirect(['/workspace/invitation/accept', 'token' => $model->invitationToken()]);
+                        }
+                        return $this->goBack();
                     }
+                    if (!Yii::$app->setting->getValue('site::verifyEmail')) {
+                        AuthNotice::set('info', AccountStatus::approvalMessage());
+                    }
+                    return $this->redirect(['/auth/default/login']);
                 }
+                if ($model->hasErrors('verifyCode')) {
+                    AuthNotice::set('danger', (string) $model->getFirstError('verifyCode'));
+                }
+            }
+            if (SignupForm::signupBlocked()) {
+                AuthNotice::set('danger', SignupForm::blockedMessage());
             }
             return $this->render('signup', [
                 'model' => $model,
@@ -346,8 +399,8 @@ class DefaultController extends WebController
     {
         $model = new PasswordResetRequestForm();
         if ($model->load(Yii::$app->request->post()) && $model->validate()) {
-            if ($model->sendEmail()) {
-                Yii::$app->session->addFlash('success', Module::t('Check your email for further instructions.'));
+            if ($model->request()) {
+                Yii::$app->session->addFlash('success', PasswordResetRequestForm::sentMessage());
                 return $this->goHome();
             } else {
                 Yii::$app->session->addFlash('error', Module::t('Sorry, we are unable to reset password for the provided email address.'));
@@ -416,7 +469,8 @@ class DefaultController extends WebController
      */
     private function exchangeAppleCode($code)
     {
-        $appleHelper = new AppleJWTHelper([
+        $appleHelper = Yii::createObject([
+            'class' => AppleJWTHelper::class,
             'teamId' => Yii::$app->setting->getValue('auth::appleTeamId'),
             'keyId' => Yii::$app->setting->getValue('auth::appleKeyId'),
             'clientId' => Yii::$app->setting->getValue('auth::appleClientId'),
@@ -452,7 +506,8 @@ class DefaultController extends WebController
      */
     private function processAppleIdToken($idToken, $userParam = null)
     {
-        $appleHelper = new AppleJWTHelper([
+        $appleHelper = Yii::createObject([
+            'class' => AppleJWTHelper::class,
             'teamId' => Yii::$app->setting->getValue('auth::appleTeamId'),
             'keyId' => Yii::$app->setting->getValue('auth::appleKeyId'),
             'clientId' => Yii::$app->setting->getValue('auth::appleClientId'),
@@ -467,7 +522,7 @@ class DefaultController extends WebController
         $userData = [
             'apple_id' => $tokenData['sub'] ?? null,
             'email' => $tokenData['email'],
-            'email_verified' => true,
+            'email_verified' => $tokenData['email_verified'] ?? false,
             'name' => '',
             'given_name' => '',
             'family_name' => '',
@@ -487,42 +542,43 @@ class DefaultController extends WebController
     }
 
     /**
-     * Process OAuth user authentication - login existing or create new user
+     * Sign in or sign up via Google/Apple (OAuthAccount). A new account follows the auth::user_status setting;
+     * an inactive account is never signed in, and the login card shows the reason (awaiting approval, not
+     * active). After signing in, the user returns to the page they came from (e.g. the invitation page) (final
+     * review U3).
      * @param array $userData User data from OAuth provider
      * @param string $provider OAuth provider name
      * @return \yii\web\Response
      */
     private function processUserAuthentication($userData, $provider)
     {
-        $email = $userData['email'];
-        $user = User::findOne(['email' => $email, 'status' => User::STATUS_ACTIVE]);
-
-        if ($user) {
-            Yii::$app->user->login($user, 3600 * 24 * 30);
-            Yii::$app->session->setFlash('success', $provider . ' ile giriş yapıldı: ' . $email);
-            return $this->goHome();
-        } else {
-            $model = new SignupForm();
-            $model->username = explode('@', $email)[0];
-            $model->email = $email;
-            $model->password = Yii::$app->security->generateRandomString(12);
-            $model->password_confirm = $model->password;
-            $model->first_name = $userData['given_name'] ?? '';
-            $model->last_name = $userData['family_name'] ?? '';
-
-            if ($newUser = $model->signup()) {
-                $newUser->status = User::STATUS_ACTIVE;
-                $newUser->email_verify = User::EMAIL_VERIFY;
-                $newUser->save(false);
-
-                Yii::$app->user->login($newUser, 3600 * 24 * 30);
-
-                Yii::$app->session->setFlash('success', $provider . ' ile hesap oluşturuldu ve giriş yapıldı: ' . $email);
-                return $this->goHome();
-            } else {
-                Yii::$app->session->setFlash('error', 'Kullanıcı oluşturulamadı: ' . print_r($model->getErrors(), true));
-                return $this->redirect(['/auth/default/login']);
-            }
+        $account = OAuthAccount::resolve($userData);
+        $user = $account->user;
+        if ($user === null && $account->reason === OAuthAccount::REASON_EMAIL_NOT_VERIFIED) {
+            $message = ($account->signupRefused && Yii::$app->setting->getValue('auth::web_signup'))
+                ? OAuthAccount::unverifiedSignupWebMessage()
+                : (string) $account->message;
+            AuthNotice::set('warning', $message);
+            return $this->redirect(['/auth/default/login']);
         }
+        if ($user === null) {
+            Yii::warning('OAuth signup failed: ' . json_encode($account->errors), 'oauth');
+            $errors = array_map(static fn ($messages) => (string) reset($messages), $account->errors);
+            Yii::$app->session->setFlash('error', Module::t('The account could not be created: {errors}', ['errors' => implode(' ', $errors)]));
+            return $this->redirect(['/auth/default/login']);
+        }
+
+        if ((int) $user->status !== User::STATUS_ACTIVE) {
+            $type = AccountStatus::of($user) === AccountStatus::INACTIVE ? 'warning' : 'info';
+            AuthNotice::set($type, AccountStatus::inactiveMessage($user));
+            return $this->redirect(['/auth/default/login']);
+        }
+
+        Yii::$app->user->login($user, 3600 * 24 * 30);
+        $params = ['provider' => $provider, 'email' => $user->email];
+        Yii::$app->session->setFlash('success', $account->isNew
+            ? Module::t('Account created and signed in with {provider}: {email}', $params)
+            : Module::t('Signed in with {provider}: {email}', $params));
+        return $this->goBack();
     }
 }

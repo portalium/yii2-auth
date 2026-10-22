@@ -4,6 +4,7 @@ namespace portalium\auth\components;
 use Yii;
 use yii\base\Component;
 use yii\httpclient\Client;
+use Firebase\JWT\JWK;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 
@@ -13,6 +14,21 @@ class AppleJWTHelper extends Component
     public $keyId;
     public $clientId;
     public $privateKey;
+
+    /**
+     * Accepted "aud" values. If empty, only $clientId is accepted.
+     * @var string[]
+     */
+    public $allowedAudiences = [];
+
+    /**
+     * Apple's signing keys (JWKS). If empty, fetched from https://appleid.apple.com/auth/keys and cached for
+     * one hour. Supplied directly in tests.
+     * @var array|null
+     */
+    public $jwks;
+
+    const ISSUER = 'https://appleid.apple.com';
 
     /**
      * Creates a client secret JWT for Apple OAuth
@@ -65,34 +81,31 @@ class AppleJWTHelper extends Component
     }
 
     /**
-     * Validates and decodes Apple ID token
+     * Verifies the Apple identity token, including its signature, and returns its payload.
+     * Returns null if the signature, "iss", "aud", or expiry is invalid.
      */
     public function decodeIdToken($idToken)
     {
         try {
-
-            // For now, we'll decode without verification (for testing)
-            // In production, you should fetch Apple's public keys and verify
-            $parts = explode('.', $idToken);
-            if (count($parts) !== 3) {
-                throw new \Exception('Invalid ID token format');
+            $jwks = $this->jwks ?? $this->getApplePublicKeys();
+            if (empty($jwks['keys'])) {
+                throw new \Exception('Apple public keys are not available');
             }
-            // Decode payload without verification for now
-            $payload = json_decode(base64_decode(strtr($parts[1], '-_', '+/')), true);
-            // Basic validation
-            if (!$payload) {
+
+            $payload = (array) JWT::decode((string) $idToken, JWK::parseKeySet($jwks, 'RS256'));
+
+            if (($payload['iss'] ?? null) !== self::ISSUER) {
+                throw new \Exception('Invalid issuer in ID token');
+            }
+
+            $audiences = array_filter(array_merge([$this->clientId], (array) $this->allowedAudiences));
+            if (empty($audiences) || !in_array($payload['aud'] ?? null, $audiences, true)) {
                 throw new \Exception('Invalid audience in ID token');
             }
 
-            if ($payload['exp'] < time()) {
-                throw new \Exception('ID token expired');
-            }
-
             return $payload;
-
-        }
-        catch (\Exception $e) {
-            Yii::error('Apple ID token decode error: ' . $e->getMessage(), 'oauth');
+        } catch (\Throwable $e) {
+            Yii::error('Apple ID token verification error: ' . $e->getMessage(), 'oauth');
             return null;
         }
     }
@@ -102,13 +115,22 @@ class AppleJWTHelper extends Component
      */
     public function getApplePublicKeys()
     {
+        $cache = Yii::$app->has('cache') ? Yii::$app->cache : null;
+        $cached = $cache ? $cache->get('auth.apple.jwks') : false;
+        if (is_array($cached) && !empty($cached['keys'])) {
+            return $cached;
+        }
+
         $client = new Client();
         $response = $client->createRequest()
             ->setMethod('GET')
             ->setUrl('https://appleid.apple.com/auth/keys')
             ->send();
 
-        if ($response->isOk) {
+        if ($response->isOk && !empty($response->data['keys'])) {
+            if ($cache) {
+                $cache->set('auth.apple.jwks', $response->data, 3600);
+            }
             return $response->data;
         }
 

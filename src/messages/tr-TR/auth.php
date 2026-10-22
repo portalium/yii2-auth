@@ -39,4 +39,42 @@ return [
     'Your registration has been successfully completed. Confirm the confirmation e-mail sent to your e-mail.' => 'Kaydınız başarıyla tamamlandı. E-postanıza gönderilen doğrulama e-postasını onaylayın.',
     'Your registration has been successfully completed.' => 'Kaydınız başarıyla tamamlandı.',
     'Your account is not active. Please activate your account.' => 'Hesabınız aktif değil. Lütfen hesabınızı aktive edin.',
+    'Your account is not active.' => 'Hesabınız aktif değil.',
+    'Your email has been verified.' => 'E-postanız doğrulandı.',
+    'Your email has been verified. Your account is awaiting administrator approval.' => 'E-postanız doğrulandı, hesabınız yönetici onayını bekliyor.',
+    'Your account is awaiting administrator approval.' => 'Hesabınız yönetici onayını bekliyor.',
+    'This verification link is invalid or has already been used.' => 'Bu doğrulama bağlantısı geçersiz ya da daha önce kullanılmış.',
+    'Your account may already be verified: try signing in. If it is not, signing in will send you a new link.' => 'Hesabınız zaten doğrulanmış olabilir: giriş yapmayı deneyin. Doğrulanmadıysa giriş denemesinde size yeni bir bağlantı gönderilir.',
+    'You can sign in once an administrator approves your account.' => 'Yönetici hesabınızı onayladığında giriş yapabilirsiniz.',
+    'Your email address is not verified yet. We sent you a new verification link.' => 'E-posta adresiniz henüz doğrulanmadı. Size yeni bir doğrulama bağlantısı gönderdik.',
+    'Your email address is not verified yet. Please use the link in the verification email we sent you.' => 'E-posta adresiniz henüz doğrulanmadı. Lütfen size gönderdiğimiz doğrulama e-postasındaki bağlantıyı kullanın.',
+    'If an unverified account exists for this address, a new verification link has been sent.' => 'Bu adrese ait doğrulanmamış bir hesap varsa yeni bir doğrulama bağlantısı gönderildi.',
+    'If you have a question or do not want to wait, you can write to {contact}.' => 'Sorunuz varsa ya da beklemek istemiyorsanız {contact} adresine yazabilirsiniz.',
+    'You will not receive an email when it is approved, so try signing in again later.' => 'Onaylandığında e-postayla haber verilmez; daha sonra tekrar giriş yapmayı deneyin.',
+    'If there is an active account for this address, we sent a password reset link to it. If your account is awaiting approval, it must be approved first.' => 'Bu adrese ait aktif bir hesap varsa şifre sıfırlama bağlantısı gönderildi. Hesabınız onay bekliyorsa önce onaylanması gerekir.',
+    'Approval Contact Email (Leave empty to hide)' => 'Onay için iletişim e-postası (gizlemek için boş bırakın)',
+    'Signed in with {provider}: {email}' => '{provider} ile giriş yapıldı: {email}',
+    'Account created and signed in with {provider}: {email}' => '{provider} ile hesap oluşturuldu ve giriş yapıldı: {email}',
+    'The account could not be created: {errors}' => 'Kullanıcı oluşturulamadı: {errors}',
+    'The sign-in provider has not verified this email address, so it cannot be used to sign in to the existing account with this address. Sign in with your password instead.' => 'Bu e-posta adresi giriş sağlayıcısı (Google/Apple) tarafından doğrulanmamış; bu yüzden bu adrese ait hesaba bu yolla girilemez. Lütfen şifrenizle giriş yapın.',
+    'This address has not been verified by Google/Apple; sign up with your email address instead.' => 'Bu adres Google/Apple tarafından doğrulanmamış; e-posta adresinizle kaydolun.',
+    'This address has not been verified by Google/Apple; sign up with your email address using the «Sign up» link below.' => 'Bu adres Google/Apple tarafından doğrulanmamış; aşağıdaki «Kayıt ol» bağlantısıyla e-posta adresinizle kaydolun.',
+    'Signing up is not possible at the moment. Please try again later.' => 'Şu an kayıt yapılamıyor. Lütfen daha sonra tekrar deneyin.',
+    'Signing up from the mobile app is currently disabled. You can try signing up on the website or contact your administrator.'
+    => 'Mobil uygulamadan kayıt şu an kapalı. Web sitesinden kaydolmayı deneyebilir ya da yöneticinize başvurabilirsiniz.',
+    'Signing in from the mobile app is currently disabled. You can sign in on the website or contact your administrator.'
+    => 'Mobil uygulamadan giriş şu an kapalı. Web sitesinden giriş yapabilir ya da yöneticinize başvurabilirsiniz.',
+    'If it is urgent, you can write to {contact}.' => 'Acil bir durumda {contact} adresine yazabilirsiniz.',
+    'You have been invited to the «{workspace}» workspace.' => '«{workspace}» çalışma alanına davet edildiniz.',
+    'If you sign up with the address the invitation was sent to ({email}) using the link in the invitation email, your account will be active right away.'
+    => 'Davetin gönderildiği adresle ({email}) e-postadaki bağlantıdan kaydolursanız hesabınız hemen etkin olur.',
+    'You are signing up with the address the invitation was sent to; your account will be active right away.'
+    => 'Davetin gönderildiği adresle kaydoluyorsunuz; hesabınız hemen etkin olur.',
+    'This is the address the invitation was sent to; it cannot be changed.' => 'Davetin gönderildiği adres; değiştirilemez.',
+    'With this invitation link you can only sign up with the address the invitation was sent to.'
+    => 'Bu davet bağlantısıyla yalnız davetin gönderildiği adresle kaydolabilirsiniz.',
+    'For an account that is active right away through the invitation, fill in the form below with the address the invitation was sent to.'
+    => 'Davetle hemen etkin hesap için aşağıdaki formu davetin geldiği adresle doldurun.',
+    'Sign up' => 'Kayıt ol',
+    'Sign up now' => 'Kayıt ol',
 ];
