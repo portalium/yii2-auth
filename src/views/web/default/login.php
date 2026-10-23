@@ -73,10 +73,10 @@ foreach ($_integrationNames as $_name) {
    Uses Yii::$app->setting with hardcoded fallbacks so boxes are never blank.
    ========================================================================== */
 $_featureDefaults = [
-    1 => ['icon' => 'feature-portalium.svg', 'title' => Module::t('Portalium-Powered'), 'desc' => Module::t('Built on the Portalium platform for seamless integration and performance.')],
-    2 => ['icon' => 'feature-ai.svg',         'title' => Module::t('CRUD Entegration'), 'desc' => Module::t('Comes with built-in CRUD operations for easy data management.')],
-    3 => ['icon' => 'feature-data.svg',       'title' => Module::t('Customizable'),       'desc' => Module::t('Highly customizable to fit your specific authentication needs.')],
-    4 => ['icon' => 'feature-productivity.svg', 'title' => Module::t('Secure & Reliable'), 'desc' => Module::t('Ensures top-notch security and reliability for your authentication processes.')],
+    1 => ['icon' => 'feature-portalium.svg', 'title' => Module::t('Vision To Insight'), 'desc' => Module::t('Transform your business.')],
+    2 => ['icon' => 'feature-ai.svg',         'title' => Module::t('Real-Time AI'), 'desc' => Module::t('Start operational intelligence.')],
+    3 => ['icon' => 'feature-data.svg',       'title' => Module::t('Data To Action'),     'desc' => Module::t('Fast, reliable, and at scale.')],
+    4 => ['icon' => 'feature-productivity.svg', 'title' => Module::t('Increase Productivity'), 'desc' => Module::t('One platform for real world.')],
 ];
 $_features = [];
 foreach ($_featureDefaults as $_i => $_def) {
