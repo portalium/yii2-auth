@@ -23,7 +23,11 @@ class Module extends \portalium\base\Module
             'class' => 'yii\rest\UrlRule',
             'controller' => [
                 'auth/default',
-            ]
+            ],
+            'extraPatterns' => [
+                'POST request-sms-verification' => 'request-sms-verification',
+                'POST verify-sms-verification' => 'verify-sms-verification',
+            ],
         ],
     ];
     

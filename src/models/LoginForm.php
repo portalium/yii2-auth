@@ -8,6 +8,7 @@ use yii\base\Model;
 use portalium\auth\Module;
 use yii\validators\EmailValidator;
 use portalium\user\models\User;
+use yii\helpers\Html;
 
 class LoginForm extends Model
 {
@@ -63,22 +64,33 @@ class LoginForm extends Model
                         $user->generateEmailVerificationToken();
                         $user->save(false) ? $user : null;
                     }
-                    $verifyLink = Yii::$app->urlManager->createAbsoluteUrl(['auth/default/verify-email', 'token' => $user->verification_token]);
+                    
                     $emailVerificationLink = Yii::$app->urlManager->createAbsoluteUrl(['/auth/default/resend-verification-email']);
-                    Yii::$app->session->addFlash('error', 'Your account is not active. Please activate your account.');
-                    // send email
-                    Yii::$app->site->mailer->setViewPath(Yii::getAlias('@portalium/auth/mail'));
-                    Yii::$app
-                        ->site
-                        ->mailer
-                        ->compose(
-                            ['html' => 'emailVerify-html', 'text' => 'emailVerify-text'],
-                            ['user' => $user]
-                        )
-                        ->setFrom(Yii::$app->setting->getValue('email::address'))
-                        ->setTo($user->email)
-                        ->setSubject(Module::t('Account activation for {email_displayname}!', ['email_displayname' => Yii::$app->setting->getValue('email::displayname')]))
-                        ->send();
+                    // Add error message with link to resend verification email
+                    //this shown as a flash message on the login page
+                    Yii::$app->session->addFlash('error',
+                        Module::t('Your account is not active. Please activate your account.') .
+                        ' <a href="' . Html::encode($emailVerificationLink) . '">' . Module::t('Click here to resend verification email') . '</a>');
+
+                    $this->addError('username', Module::t('Your account is not active.'));
+
+                    //why do we need to send email here? we already send email when user signs up. 
+                    //we dont need resend every time user tries to login.
+
+                    // // send email
+                    // Yii::$app->site->mailer->setViewPath(Yii::getAlias('@portalium/auth/mail'));
+                    // Yii::$app
+                    //     ->site
+                    //     ->mailer
+                    //     ->compose(
+                    //         ['html' => 'emailVerify-html', 'text' => 'emailVerify-text'],
+                    //         ['user' => $user]
+                    //     )
+                    //     ->setFrom(Yii::$app->setting->getValue('email::address'))
+                    //     ->setTo($user->email)
+                    //     ->setSubject(Module::t('Account activation for {email_displayname}!', ['email_displayname' => Yii::$app->setting->getValue('email::displayname')]))
+                    //     ->send();
+
                     return false;
                 }
             } else {

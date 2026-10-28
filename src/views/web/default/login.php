@@ -13,6 +13,9 @@ $iconBundle = IconAsset::register($this);
 
 $_appTitle = Html::encode(Yii::$app->setting->getValue('app::title') ?? 'Portalium');
 
+$flashError   = (array) Yii::$app->session->getFlash('error', [], true);
+$flashSuccess = (array) Yii::$app->session->getFlash('success', [], true);
+
 try {
     $_formTitle = trim(Yii::$app->setting->getValue('auth::login_form_title') ?? '');
 } catch (\Exception $e) {
@@ -131,6 +134,14 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
         <div class="bg-white rounded-4 shadow-lg px-4 py-4" style="min-width:320px;max-width:400px;width:100%;">
             <h3 class="card-title text-center mb-1 fw-bold text-dark">Log in to Command Center</h3>
             <p class="text-center text-muted mb-3"><?= Html::encode($_formSubtitle) ?></p>
+
+            <?php foreach ($flashSuccess as $_msg): ?>
+                <div class="alert alert-success py-2 mb-2 small"><?= Html::encode($_msg) ?></div>
+            <?php endforeach; ?>
+            <?php foreach ($flashError as $_msg): ?>
+                <div class="alert alert-danger py-2 mb-2 small"><?= $_msg ?></div>
+            <?php endforeach; ?>
+
             <!-- Social Providers -->
             <?php
             $providers = [
@@ -309,6 +320,12 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
                 <h2 class="auth-form-title"><?= Html::encode($_formTitle) ?></h2>
                 <p class="auth-form-subtitle"><?= Html::encode($_formSubtitle) ?></p>
             </div>
+            <?php foreach ($flashSuccess as $_msg): ?>
+                <div class="alert alert-success py-2 mb-2 small"><?= Html::encode($_msg) ?></div>
+            <?php endforeach; ?>
+            <?php foreach ($flashError as $_msg): ?>
+                <div class="alert alert-danger py-2 mb-2 small"><?= $_msg ?></div>
+            <?php endforeach; ?>
             <?php $form = ActiveForm::begin([
                 'id' => 'login-form',
                 'fieldConfig' => [

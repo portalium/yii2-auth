@@ -35,6 +35,7 @@ composer require portalium/_____
 ### Components
 
 - [Example Component](docs/components/component.md)
+- [SMS phone verification](docs/components/sms-verification.md)
 - [_____](docs/components/_____.md)
 - [_____](docs/components/_____.md)
 

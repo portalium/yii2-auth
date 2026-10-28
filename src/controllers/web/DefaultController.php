@@ -19,6 +19,9 @@ use portalium\auth\models\PasswordResetRequestForm;
 use portalium\auth\models\VerifyEmailForm;
 use portalium\auth\components\OAuthClient;
 use portalium\auth\components\AppleJWTHelper;
+use portalium\auth\components\SmsVerificationService;
+use portalium\auth\models\SmsVerification;
+use portalium\site\widgets\FlashMessage;
 
 /**
  * Authentication controller for web interface
@@ -38,13 +41,13 @@ class DefaultController extends WebController
                 'class' => AccessControl::class,
                 'rules' => [
                     [
-                        'actions' => ['logout'],
+                        'actions' => ['logout', 'request-sms-verification', 'verify-sms-verification'],
                         'allow' => true,
                         'roles' => ['@'],
                     ],
                     [
                         'actions' => ['index', 'login', 'login-google', 'callback-google', 'login-apple', 'callback-apple','signup', 
-        'request-password-reset', 'reset-password'],
+                        'request-password-reset', 'reset-password', 'resend-verification-email', 'verify-email'],
                         'allow' => true,
                         'roles' => ['?'],
                     ],
@@ -110,12 +113,19 @@ class DefaultController extends WebController
         }
 
         $model = new LoginForm();
-        if ($model->load(Yii::$app->request->post()) && $model->login()) {
+        if ($model->load(Yii::$app->request->post()) && $model->login()) 
+        {
             if (Yii::$app->setting->getValue('app::language')) {
                 Yii::$app->session->set('lang', Yii::$app->setting->getValue('app::language'));
             }
             return $this->goBack();
-        } else {
+        } 
+        else 
+        {
+            if ($model->hasErrors() && !Yii::$app->session->hasFlash('error')) 
+            {
+                Yii::$app->session->setFlash('error', Module::t('Invalid credentials or account not verified'));
+            }
             return $this->render('login', [
                 'model' => $model,
             ]);
@@ -305,6 +315,100 @@ class DefaultController extends WebController
             'model' => $model
         ]);
     }
+
+    /**
+     * Request an SMS verification code for a phone number.
+     * Requires authentication and a verified e-mail (enforced by the service).
+     */
+    public function actionRequestSmsVerification()
+    {
+        if (Yii::$app->user->isGuest) 
+        {
+            Yii::$app->session->setFlash('error', 'You need to log in a email verified account first.');
+            
+            return $this->redirect(['/auth/default/login']);
+        }
+
+        $result = null;
+        // Prefill priority: POST (re-render after a failure) > GET (from profile page) > current number
+        $phone = trim((string) Yii::$app->request->get('tel_no', Yii::$app->user->identity->tel_no ?? ''));
+
+        if (Yii::$app->request->isPost) {
+            $phone = trim((string) Yii::$app->request->post('tel_no', ''));
+            if ($phone !== '') {
+                $result = (new SmsVerificationService())->requestCode($phone);
+
+                if (!empty($result['success'])) {
+                    Yii::$app->session->setFlash(
+                        'success',
+                        $result['message'] ?? Module::t('If the number is available, a verification code will be sent.')
+                    );
+
+                    // 'already_verified' → nothing more to do
+                    if (($result['status'] ?? '') !== 'already_verified') {
+                        return $this->redirect(['/auth/default/verify-sms-verification']);
+                    }
+                    return $this->goHome();
+                }
+
+                // Show the service error on the form
+                Yii::$app->session->setFlash('error', $result['message'] ?? Module::t('The verification message could not be sent.'));
+            }
+        }
+
+        $user   = Yii::$app->user->identity;
+        return $this->render('requestSmsVerification', [
+            'user'   => $user,
+            'result' => $result,
+            'prefillPhone' => $phone,
+        ]);
+    }
+
+    /**
+     * Verify the 6-digit SMS code the user received.
+     */
+    public function actionVerifySmsVerification()
+    {
+        if (Yii::$app->user->isGuest) {
+            return $this->redirect(['/auth/default/login']);
+        }
+
+        $user   = Yii::$app->user->identity;
+        $result = null;
+
+        if (Yii::$app->request->isPost) {
+            $code = trim((string) Yii::$app->request->post('code', ''));
+            if ($code !== '') {
+                $result = (new SmsVerificationService())->verifyCode($code);
+
+                if (!empty($result['success'])) {
+                    Yii::$app->session->setFlash(
+                        'success',
+                        $result['message'] ?? Module::t('Phone number verified successfully.')
+                    );
+                    return $this->goHome();
+                }
+
+                Yii::$app->session->setFlash('error', $result['message'] ?? Module::t('The verification code is invalid or expired.'));
+            }
+        }
+
+        // Figure out which number is currently being verified (pending takes priority)
+        $pendingPhone = null;
+        $verification = SmsVerification::findOne(['id_user' => $user->id_user]);
+        if ($verification) {
+            $pendingPhone = $verification->pending_phone
+                ?: $verification->active_phone
+                ?: null;
+        }
+
+        return $this->render('verifySmsVerification', [
+            'user'         => $user,
+            'result'       => $result,
+            'pendingPhone' => $pendingPhone,
+        ]);
+    }
+
 
     /**
      * Logout user and redirect to home
