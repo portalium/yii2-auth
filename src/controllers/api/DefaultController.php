@@ -21,9 +21,47 @@ use portalium\auth\models\PasswordResetRequestForm;
 use portalium\auth\models\ResetPasswordForm;
 use yii\base\InvalidParamException;
 use yii\rest\Controller;
+use portalium\developer\attributes as Doc;
+use portalium\helpers\RestHelper;
 
+#[Doc\Tag('Authentication', 'Sign in, sign up and password reset. These endpoints need no token; a successful sign-in returns one in `user.access_token`.')]
+#[Doc\Operation(
+    action: ['login', 'signup', 'google-signin', 'apple-signin', 'profile', 'request-password-reset', 'reset-password'],
+    audience: Doc\Operation::PUBLIC,
+    method: 'POST',
+)]
 class DefaultController extends Controller
 {
+    /** API document shapes (portalium/yii2-developer) */
+    private const DOC_USER = [
+        'id' => 'integer',
+        'email' => 'string',
+        'username' => 'string',
+        'first_name' => 'string?',
+        'last_name' => 'string?',
+        'access_token' => 'string - Only for an active, signed-in account; send it as `Authorization: Bearer <token>`',
+    ];
+    private const DOC_STATUS = 'enum:active,pending_approval,email_not_verified,inactive,api_login_disabled,api_signup_disabled,'
+        . 'provider_email_not_verified - Machine-readable result';
+    private const DOC_SIGNED_IN = [
+        'success' => 'boolean',
+        'status' => self::DOC_STATUS,
+        'message' => 'string - In the user\'s language; can be shown as is',
+        'approval_contact' => 'string? - Only with pending_approval: address to contact the administrator',
+        'is_new_user' => 'boolean - Google/Apple only',
+        'user' => self::DOC_USER,
+    ];
+    private const DOC_REFUSED = [
+        'success' => 'boolean',
+        'status' => self::DOC_STATUS,
+        'message' => 'string',
+        'approval_contact' => 'string?',
+        'errors' => 'object - Field => messages',
+    ];
+    private const DOC_FAILED = ['success' => 'boolean', 'message' => 'string', 'errors' => 'object - Field => messages'];
+    private const DOC_KEY_ERRORS = ['key' => 'string', 'message' => 'string'];
+    private const DOC_DONE = ['success' => 'boolean', 'message' => 'string'];
+
     /**
      * API behaviors
      */
@@ -73,6 +111,16 @@ class DefaultController extends Controller
      * 
      * @return array
      */
+    #[Doc\Operation(
+        summary: 'Sign in with username or email and password',
+        description: 'On success `status` is `active` and `user.access_token` is returned. An account that exists but is not active gets 403 with its '
+            . '`status` (e.g. '
+            . '`pending_approval`); no token is returned then.',
+    )]
+    #[Doc\Body(LoginForm::class, description: '`username` may also be the email address.')]
+    #[Doc\Response(200, 'Signed in.', fields: self::DOC_SIGNED_IN)]
+    #[Doc\Response(401, 'Wrong username or password.', fields: self::DOC_FAILED)]
+    #[Doc\Response(403, 'Account not active, or API sign-in disabled by the administrator.', fields: self::DOC_REFUSED)]
     public function actionLogin()
     {
         if (!ApiAccess::loginAllowed()) {
@@ -111,6 +159,16 @@ class DefaultController extends Controller
      *
      * @return array
      */
+    #[Doc\Operation(
+        summary: 'Sign up',
+        description: 'Depending on the site settings the new account is active at once (token returned) or `pending_approval` / `email_not_verified` (no '
+            . 'token). '
+            . 'Signing up with the address of an invitation (`invitation` = token from the invitation link) activates the account immediately.',
+    )]
+    #[Doc\Body(SignupForm::class, exclude: ['verifyCode'])]
+    #[Doc\Response(200, 'Account created.', fields: self::DOC_SIGNED_IN)]
+    #[Doc\Response(403, 'API sign-up disabled by the administrator.', fields: self::DOC_REFUSED)]
+    #[Doc\Response(422, 'Validation failed.', fields: self::DOC_FAILED)]
     public function actionSignup()
     {
         if (!ApiAccess::signupAllowed()) {
@@ -147,6 +205,17 @@ class DefaultController extends Controller
      * 
      * @return array
      */
+    #[Doc\Operation(
+        summary: 'Sign in or sign up with Google',
+        description: 'Send the ID token from Google Sign-In (web, Android or iOS client). A new account follows the site\'s approval setting, so it may '
+            . 'come back as '
+            . '`pending_approval` without a token.',
+    )]
+    #[Doc\Body(fields: ['id_token' => 'string - Google ID token'], required: ['id_token'])]
+    #[Doc\Response(200, 'Signed in, or a new account was created.', fields: self::DOC_SIGNED_IN)]
+    #[Doc\Response(400, 'id_token missing.', fields: self::DOC_DONE)]
+    #[Doc\Response(401, 'Invalid token.', fields: self::DOC_DONE)]
+    #[Doc\Response(403, 'Account not active, email not verified by Google, or sign-in/sign-up disabled.', fields: self::DOC_REFUSED)]
     public function actionGoogleSignin()
     {
         if (!ApiAccess::loginAllowed()) {
@@ -199,6 +268,21 @@ class DefaultController extends Controller
      * 
      * @return array
      */
+    #[Doc\Operation(
+        summary: 'Sign in or sign up with Apple',
+        description: 'Send the identity token from Sign in with Apple. On the first sign-in Apple also gives the name; pass it in `user`.',
+    )]
+    #[Doc\Body(fields: [
+        'id_token' => 'string - Apple identity token',
+        'user' => [
+            'type' => 'object',
+            'description' => 'First sign-in only, as Apple returns it (object or JSON string): `{"name": {"firstName": "...", "lastName": "..."}}`',
+        ],
+    ], required: ['id_token'])]
+    #[Doc\Response(200, 'Signed in, or a new account was created.', fields: self::DOC_SIGNED_IN)]
+    #[Doc\Response(400, 'id_token missing.', fields: self::DOC_DONE)]
+    #[Doc\Response(401, 'Invalid token.', fields: self::DOC_DONE)]
+    #[Doc\Response(403, 'Account not active or sign-in/sign-up disabled.', fields: self::DOC_REFUSED)]
     public function actionAppleSignin()
     {
         if (!ApiAccess::loginAllowed()) {
@@ -243,6 +327,11 @@ class DefaultController extends Controller
      * 
      * @return array
      */
+    #[Doc\Operation(summary: 'My profile', description: 'The signed-in user. Also used by the `novavision login` CLI to check a token.', method: 'GET')]
+    #[Doc\Response(200, 'The user.', fields: ['success' => 'boolean', 'user' => [
+        'id' => 'integer', 'email' => 'string', 'username' => 'string', 'first_name' => 'string?', 'last_name' => 'string?',
+        'created_at' => 'string', 'updated_at' => 'string',
+    ]])]
     public function actionProfile()
     {
         if (Yii::$app->user->isGuest) {
@@ -274,6 +363,13 @@ class DefaultController extends Controller
      * 
      * @return array
      */
+    #[Doc\Operation(
+        summary: 'Request a password reset email',
+        description: 'Sends a link with a reset token to the address. The same message is returned whether or not the address has an account.',
+    )]
+    #[Doc\Body(PasswordResetRequestForm::class)]
+    #[Doc\Response(200, 'Email sent (or nothing to send).', fields: self::DOC_DONE)]
+    #[Doc\Response(422, 'Invalid email.', fields: self::DOC_KEY_ERRORS, list: true)]
     public function actionRequestPasswordReset()
     {
         $model = new PasswordResetRequestForm();
@@ -286,13 +382,13 @@ class DefaultController extends Controller
                         'success' => true
                     ];
                 } else {
-                    return $this->error(['PasswordReset' => 'Sorry, we are unable to reset password for the provided email address.']);
+                    return RestHelper::error(['PasswordReset' => 'Sorry, we are unable to reset password for the provided email address.']);
                 }
             } else {
-                return $this->modelError($model);
+                return RestHelper::modelError($model);
             }
         } else {
-            return $this->error(['PasswordResetRequest' => 'Email (email) is required.']);
+            return RestHelper::error(['PasswordResetRequest' => 'Email (email) is required.']);
         }
     }
 
@@ -301,6 +397,10 @@ class DefaultController extends Controller
      * 
      * @return array
      */
+    #[Doc\Operation(summary: 'Set a new password', description: '`token` is the one in the reset link.')]
+    #[Doc\Body(fields: ['token' => 'string - Token from the reset email', 'password' => 'string - At least 6 characters'], required: ['token', 'password'])]
+    #[Doc\Response(200, 'Password changed.', fields: self::DOC_DONE)]
+    #[Doc\Response(422, 'Missing or invalid token or password.', fields: self::DOC_KEY_ERRORS, list: true)]
     public function actionResetPassword()
     {
         $bodyParams = Yii::$app->request->getBodyParams();
@@ -308,17 +408,17 @@ class DefaultController extends Controller
         $password = $bodyParams['password'] ?? null;
 
         if (!$token) {
-            return $this->error(['ResetPassword' => 'Token (token) is required.']);
+            return RestHelper::error(['ResetPassword' => 'Token (token) is required.']);
         }
 
         if (!$password) {
-            return $this->error(['ResetPassword' => 'Password (password) is required.']);
+            return RestHelper::error(['ResetPassword' => 'Password (password) is required.']);
         }
 
         try {
             $model = new ResetPasswordForm($token);
         } catch (InvalidParamException $e) {
-            return $this->error(['ResetPassword' => $e->getMessage()]);
+            return RestHelper::error(['ResetPassword' => $e->getMessage()]);
         }
 
         $model->password = $password;
@@ -328,7 +428,7 @@ class DefaultController extends Controller
                 'success' => true
             ];
         } else {
-            return $this->modelError($model);
+            return RestHelper::modelError($model);
         }
     }
 
