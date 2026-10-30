@@ -21,7 +21,7 @@ use portalium\auth\models\PasswordResetRequestForm;
 use portalium\auth\models\ResetPasswordForm;
 use yii\base\InvalidParamException;
 use yii\rest\Controller;
-use portalium\developer\attributes as Doc;
+use portalium\openapi\attributes as Doc;
 use portalium\helpers\RestHelper;
 
 #[Doc\Tag('Authentication', 'Sign in, sign up and password reset. These endpoints need no token; a successful sign-in returns one in `user.access_token`.')]
@@ -32,7 +32,7 @@ use portalium\helpers\RestHelper;
 )]
 class DefaultController extends Controller
 {
-    /** API document shapes (portalium/yii2-developer) */
+    /** API document shapes (portalium/yii2-openapi) */
     private const DOC_USER = [
         'id' => 'integer',
         'email' => 'string',
