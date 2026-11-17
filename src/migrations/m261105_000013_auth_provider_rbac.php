@@ -34,7 +34,12 @@ class m261105_000013_auth_provider_rbac extends Migration
             }
         }
 
-        $workspaceAdmin = $auth->getRole((string) Yii::$app->setting->getValue('app::workspace::admin_role'));
+        try {
+            $workspaceAdminRole = (string) Yii::$app->setting->getValue('app::workspace::admin_role');
+        } catch (\Exception $e) {
+            $workspaceAdminRole = '';
+        }
+        $workspaceAdmin = $workspaceAdminRole === '' ? null : $auth->getRole($workspaceAdminRole);
         if ($workspaceAdmin !== null) {
             foreach (self::WORKSPACE_ADMIN_PERMISSIONS as $permissionName) {
                 $permission = $auth->getPermission($permissionName);

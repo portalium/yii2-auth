@@ -254,7 +254,11 @@ class AuthProvider extends ActiveRecord
      */
     public static function manageableWorkspaces(int $idUser): array
     {
-        $role = (string) Yii::$app->setting->getValue('app::workspace::admin_role');
+        try {
+            $role = (string) Yii::$app->setting->getValue('app::workspace::admin_role');
+        } catch (\Exception $e) {
+            return [];
+        }
         $ids = WorkspaceUser::find()->select('id_workspace')
             ->where(['id_user' => $idUser, 'id_module' => 'app', 'role' => $role])->column();
 
