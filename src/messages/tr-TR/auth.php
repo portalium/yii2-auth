@@ -305,4 +305,13 @@ return [
     'Other LDAP directory (OpenLDAP, …)' => 'Diğer LDAP dizini (OpenLDAP, …)',
     'Directory type' => 'Dizin türü',
     'Corporate Login Settings' => 'Kurumsal Giriş Ayarları',
+    'Complete registration' => 'Kaydı tamamla',
+    'Accept the documents below to continue.' => 'Devam etmek için aşağıdaki metinleri onaylayın.',
+    'Please accept the required documents to continue.' => 'Devam etmek için zorunlu metinleri onaylayın.',
+    'Your approval could not be saved. Please try again.' => 'Onayınız kaydedilemedi. Lütfen tekrar deneyin.',
+    'Required' => 'Zorunlu',
+    'Optional' => 'İsteğe bağlı',
+    'Read' => 'Oku',
+    'Accept and continue' => 'Onayla ve devam et',
+    'Sign out' => 'Çıkış yap',
 ];

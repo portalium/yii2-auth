@@ -20,6 +20,7 @@ use portalium\auth\models\AuthLog;
 use portalium\auth\components\ApiAccess;
 use portalium\auth\components\OAuthAccount;
 use portalium\auth\components\OAuthLink;
+use portalium\auth\components\RegistrationRequirements;
 use portalium\auth\Module;
 use portalium\auth\models\PasswordResetRequestForm;
 use portalium\auth\models\ResetPasswordForm;
@@ -54,6 +55,8 @@ class DefaultController extends Controller
         'approval_contact' => 'string? - Only with pending_approval: address to contact the administrator',
         'is_new_user' => 'boolean - Google/Apple only',
         'user' => self::DOC_USER,
+        'registration_required' => 'boolean - A required document is not accepted yet: show the "complete registration" step',
+        'registration_items' => 'array - {key, label, url, required, accepted} per document',
     ];
     private const DOC_REFUSED = [
         'success' => 'boolean',
@@ -145,7 +148,7 @@ class DefaultController extends Controller
                 'status' => AccountStatus::ACTIVE,
                 'message' => 'Login successful',
                 'user' => $this->userFields(Yii::$app->user->identity, true),
-            ];
+            ] + RegistrationRequirements::apiFields(Yii::$app->user->identity);
         }
 
         if ($model->isLocked()) {
@@ -207,7 +210,7 @@ class DefaultController extends Controller
                 'status' => AccountStatus::ACTIVE,
                 'message' => 'Registration successful',
                 'user' => $this->userFields($user, true),
-            ];
+            ] + RegistrationRequirements::apiFields($user);
         }
 
         Yii::$app->response->statusCode = 422;
@@ -650,7 +653,7 @@ class DefaultController extends Controller
             'message' => $account->isNew ? 'Account created and logged in with ' . $provider : 'Login successful with ' . $provider,
             'is_new_user' => $account->isNew,
             'user' => $this->userFields($user, true),
-        ];
+        ] + RegistrationRequirements::apiFields($user);
     }
 
     /**

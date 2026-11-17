@@ -4,6 +4,7 @@ namespace portalium\auth;
 
 use portalium\base\Event;
 use portalium\auth\components\AuthLogListener;
+use portalium\auth\components\RegistrationRequirements;
 use portalium\auth\components\TriggerActions;
 
 class Module extends \portalium\base\Module
@@ -18,6 +19,10 @@ class Module extends \portalium\base\Module
     const EVENT_ON_LOGIN = 'onLogin';
     const EVENT_ON_LOGOUT = 'onLogout';
     const EVENT_ON_SIGNUP = 'onSignup';
+
+    /** "Complete registration" step (RegistrationRequirements, RegistrationEvent) */
+    const EVENT_REGISTRATION_REQUIREMENTS = 'registrationRequirements';
+    const EVENT_REGISTRATION_ACCEPT = 'registrationAccept';
 
     /**
      * OAuth server for MCP clients (OauthController); the discovery documents live where the standards put them.
@@ -64,5 +69,6 @@ class Module extends \portalium\base\Module
     public function registerEvents()
     {
         AuthLogListener::register();
+        RegistrationRequirements::register();
     }
 }
