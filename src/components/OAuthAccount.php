@@ -10,13 +10,14 @@ use portalium\user\models\User;
 /**
  * Finds or creates the account for a Google/Apple user; web and API use the same rule.
  *
- * The account is matched by email, and an existing account's status is never changed: a pending or deleted
- * account is never activated this way. An existing account is only signed into if the provider reports the
- * email as verified; otherwise someone else's address carried in the token could sign in to that account
- * without a password. Likewise, when no account exists, a new one is not created with an address the provider
- * has not verified (decision 6, 2026-10-18): doing so would let the token holder take an address the real
- * owner hasn't signed up with yet. A new account follows the auth::user_status setting, skips email
- * verification (Card 2, decision A), and is marked verified.
+ * An identity already linked to an account (OAuthLink, by the provider's user id) signs into that account. Otherwise,
+ * if an account with the provider's email exists, it is not signed into: its owner signs in with the password and
+ * links Google/Apple from the profile (decision 2026-11-04). A pending or deleted account is returned unchanged so the
+ * caller shows its status (Card 2), but only if the provider verified the email; it is never activated or signed into
+ * this way. A virtual (device) account is always refused. When no account exists, a new one is not created with an
+ * address the provider has not verified (decision 6, 2026-10-18): doing so would let the token holder take an
+ * address the real owner hasn't signed up with yet. A new account follows the auth::user_status setting, skips email
+ * verification (Card 2, decision A), is marked verified and linked.
  */
 class OAuthAccount
 {
@@ -25,6 +26,13 @@ class OAuthAccount
 
     /** No account exists and creating a new one is not allowed (auth::api_signup disabled on the API, decision 18). */
     public const REASON_SIGNUP_DISABLED = 'signup_disabled';
+
+    /** An account with this email exists and the identity is not linked to it; link it from the profile. */
+    public const REASON_ACCOUNT_EXISTS = 'account_exists';
+    public const REASON_CORPORATE_ONLY = 'corporate_only';
+
+    /** @var string|null the provider (OAuthLink::GOOGLE / APPLE) */
+    public $provider;
 
     /** @var User|null the account found or created; null if it could not be created or was refused */
     public $user;
@@ -45,12 +53,28 @@ class OAuthAccount
     public $signupRefused = false;
 
     /**
-     * @param array $userData data extracted from OAuthClient::verifyIdToken or the Apple token (email, email_verified, given_name, family_name)
+     * @param array $userData data extracted from OAuthClient::verifyIdToken or the Apple token
+     *     (google_id / apple_id, email, email_verified, given_name, family_name)
      * @param bool $allowSignup whether a new account may be created if none exists; false returns REASON_SIGNUP_DISABLED
      */
     public static function resolve(array $userData, bool $allowSignup = true): self
     {
         $account = new self();
+        $identity = OAuthLink::identityOf($userData);
+        if ($identity === null) {
+            $account->errors = ['id_token' => ['The provider user id is missing in the token.']];
+            return $account;
+        }
+        [$provider, $providerId] = $identity;
+        $account->provider = $provider;
+        $linked = OAuthLink::findUser($provider, $providerId);
+        if ($linked !== null) {
+            if (ProviderAccount::corporateOnly($linked)) {
+                return $account->refuse(self::REASON_CORPORATE_ONLY, Module::t('This account signs in with its company sign-in only.'));
+            }
+            $account->user = $linked;
+            return $account;
+        }
         $email = trim((string) ($userData['email'] ?? ''));
         if ($email === '') {
             $account->errors = ['email' => ['Email is missing in the provider token.']];
@@ -58,11 +82,11 @@ class OAuthAccount
         }
         $existing = User::findOne(['email' => $email]);
         if ($existing !== null) {
-            if (!self::providerVerified($userData)) {
-                return $account->refuse(self::REASON_EMAIL_NOT_VERIFIED, self::unverifiedMessage());
+            if ((int) $existing->status !== User::STATUS_ACTIVE && (int) $existing->is_virtual !== 1 && self::providerVerified($userData)) {
+                $account->user = $existing;
+                return $account;
             }
-            $account->user = $existing;
-            return $account;
+            return $account->refuse(self::REASON_ACCOUNT_EXISTS, OAuthLink::accountExistsMessage($provider));
         }
         if (!$allowSignup) {
             return $account->refuse(self::REASON_SIGNUP_DISABLED, ApiAccess::signupDisabledMessage());
@@ -81,6 +105,7 @@ class OAuthAccount
             'first_name' => $userData['given_name'] ?? '',
             'last_name' => $userData['family_name'] ?? '',
         ]);
+        SignupSource::expect($provider === OAuthLink::APPLE ? SignupSource::APPLE : SignupSource::GOOGLE);
         $user = $form->signup(false);
         if ($user === null) {
             $account->errors = $form->getErrors();
@@ -89,6 +114,7 @@ class OAuthAccount
 
         $user->email_verify = User::EMAIL_VERIFY;
         $user->save(false);
+        OAuthLink::link((int) $user->id_user, $provider, $providerId, $email);
         $account->user = $user;
         $account->isNew = true;
 
@@ -111,14 +137,6 @@ class OAuthAccount
     public static function providerVerified(array $userData): bool
     {
         return filter_var($userData['email_verified'] ?? false, FILTER_VALIDATE_BOOLEAN);
-    }
-
-    public static function unverifiedMessage(): string
-    {
-        return Module::t(
-            'The sign-in provider has not verified this email address, so it cannot be used to sign in to the existing account'
-            . ' with this address. Sign in with your password instead.'
-        );
     }
 
     /**

@@ -301,6 +301,12 @@
     padding: 3rem !important;
 }
 
+/* Panel centres its children, so the feature grid needs an explicit width or it shrinks to its content */
+.auth-left-panel .auth-features {
+    width: 100%;
+    max-width: 44rem;
+}
+
 .auth-left-panel .auth-brand {
     position: absolute !important;
     top: 15% !important;

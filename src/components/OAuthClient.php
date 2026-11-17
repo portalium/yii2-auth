@@ -174,6 +174,7 @@ class OAuthClient extends Component
             'picture' => $actualPayload['picture'] ?? '',
             'locale' => $actualPayload['locale'] ?? '',
             'client_id' => $actualPayload['aud'] ?? null, // Which client ID was used
+            'nonce' => $actualPayload['nonce'] ?? null,
         ];
 
         if (empty($userData['email']) || empty($userData['google_id'])) {

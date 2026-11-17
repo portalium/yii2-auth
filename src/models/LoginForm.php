@@ -7,6 +7,10 @@ use portalium\base\Event;
 use yii\base\Model;
 use portalium\auth\Module;
 use portalium\auth\components\AccountStatus;
+use portalium\auth\components\AuthLogger;
+use portalium\auth\components\ProviderAccount;
+use portalium\auth\components\LoginThrottle;
+use portalium\auth\models\AuthLog;
 use yii\validators\EmailValidator;
 use portalium\user\models\User;
 
@@ -18,11 +22,13 @@ class LoginForm extends Model
     private $_user;
     private $accountStatus;
     private $accountMessage;
+    private $locked = false;
 
     public function rules()
     {
         return [
             [['username', 'password'], 'required'],
+            [['username', 'password'], 'string'],
             ['rememberMe', 'boolean'],
             ['password', 'validatePassword'],
         ];
@@ -37,14 +43,45 @@ class LoginForm extends Model
         ];
     }
 
+    /**
+     * The password check, behind the lock (LoginThrottle): a locked account or client is refused, and so is an
+     * attempt over the limit, before the password is checked; a right password takes its attempt back.
+     */
     public function validatePassword($attribute, $params)
     {
         if (!$this->hasErrors()) {
             $user = $this->getUser();
-            if (!$user || !$user->validatePassword($this->password)) {
-                $this->addError($attribute, Module::t('Incorrect email or password.'));
+            $name = (string) $this->username;
+            $ip = LoginThrottle::requestIp();
+            $seconds = LoginThrottle::lockedFor($name, $user, $ip);
+            if ($seconds > 0 || !LoginThrottle::reserve($name, $user, $ip)) {
+                $this->locked = true;
+                $minutes = $seconds > 0 ? (int) ceil($seconds / 60) : LoginThrottle::minutes();
+                $this->addError($attribute, Module::t('Too many failed attempts. Try again in {minutes} minutes.', [
+                    'minutes' => $minutes,
+                ]));
+                AuthLogger::failed($name, $user, AuthLog::REASON_LOCKED, AuthLog::METHOD_PASSWORD);
+                return;
             }
+            $valid = $user !== null && !ProviderAccount::corporateOnly($user) && $user->validatePassword($this->password);
+            if (!$valid) {
+                $this->addError($attribute, Module::t('Incorrect email or password.'));
+                AuthLogger::failed(
+                    $name,
+                    $user,
+                    $user ? AuthLog::REASON_WRONG_PASSWORD : AuthLog::REASON_UNKNOWN_USER,
+                    AuthLog::METHOD_PASSWORD
+                );
+                return;
+            }
+            LoginThrottle::succeeded($name, $user, $ip);
         }
+    }
+
+    /** Whether the last check was refused by the lock (the API answers 429). */
+    public function isLocked(): bool
+    {
+        return $this->locked;
     }
 
     public function login()
@@ -63,6 +100,7 @@ class LoginForm extends Model
 
         Yii::$app->session->set("login_status", false);
         $this->accountStatus = AccountStatus::of($user);
+        AuthLogger::failed((string) $this->username, $user, $this->accountStatus, AuthLog::METHOD_PASSWORD);
         $this->accountMessage = AccountStatus::inactiveMessage($user);
         return false;
     }

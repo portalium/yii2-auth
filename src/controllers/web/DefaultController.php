@@ -19,8 +19,12 @@ use portalium\auth\models\PasswordResetRequestForm;
 use portalium\auth\models\VerifyEmailForm;
 use portalium\auth\components\AuthNotice;
 use portalium\auth\components\AccountStatus;
+use portalium\auth\components\AuthLogger;
+use portalium\auth\models\AuthLog;
 use portalium\auth\components\OAuthAccount;
 use portalium\auth\components\OAuthClient;
+use portalium\auth\components\OAuthLink;
+use portalium\auth\components\OAuthLoginState;
 use portalium\auth\components\AppleJWTHelper;
 
 /**
@@ -29,6 +33,9 @@ use portalium\auth\components\AppleJWTHelper;
 class DefaultController extends WebController
 {
     public $layout = '@portalium/theme/layouts/main';
+
+    /** The profile page, where Google/Apple are linked and removed. */
+    private const PROFILE_ROUTE = '/site/profile/edit';
 
     /**
      * Configure access control and verb filters
@@ -47,18 +54,18 @@ class DefaultController extends WebController
                 },
                 'rules' => [
                     [
-                        'actions' => ['logout'],
+                        'actions' => ['logout', 'connect-google', 'connect-apple', 'disconnect'],
                         'allow' => true,
                         'roles' => ['@'],
                     ],
                     [
-                        'actions' => ['index', 'login', 'login-google', 'callback-google', 'login-apple', 'callback-apple','signup', 
+                        'actions' => ['index', 'login', 'login-google', 'login-apple', 'signup',
                         'request-password-reset', 'reset-password', 'resend-verification-email', 'verify-email'],
                         'allow' => true,
                         'roles' => ['?'],
                     ],
                     [
-                        'actions' => ['verify-email', 'resend-verification-email'],
+                        'actions' => ['verify-email', 'resend-verification-email', 'callback-google', 'callback-apple'],
                         'allow' => true,
                     ],
                 ],
@@ -67,6 +74,7 @@ class DefaultController extends WebController
                 'class' => VerbFilter::class,
                 'actions' => [
                     'logout' => ['post'],
+                    'disconnect' => ['post'],
                 ],
             ],
         ];
@@ -95,6 +103,9 @@ class DefaultController extends WebController
     {
         if (Yii::$app->setting->getValue('auth::layout') != '')
             $this->layout = '@portalium/theme/layouts/' . Yii::$app->setting->getValue('auth::layout');
+
+        // sign-in pages are not dark-ready (docs/koyu-tema-plani.md, decision 7.4)
+        $this->view->params['colorMode'] = 'light';
 
         if ($action->id === 'popup-callback-apple' || $action->id === 'callback-apple') {
             $this->enableCsrfValidation = false;
@@ -147,41 +158,49 @@ class DefaultController extends WebController
      */
     public function actionLoginGoogle()
     {
-        if (!Yii::$app->setting->getValue('auth::googleEnabled')) {
+        if (!OAuthLink::enabled(OAuthLink::GOOGLE)) {
             throw new \yii\web\NotFoundHttpException('Google login is not available.');
         }
 
-        $params = [
-            'client_id' => Yii::$app->setting->getValue('auth::googleClientId'),
-            'redirect_uri' => Yii::$app->urlManager->createAbsoluteUrl(['/auth/default/callback-google']),
-            'response_type' => 'code',
-            'scope' => 'email profile',
-            'access_type' => 'offline',
-            'prompt' => 'select_account',
-        ];
-
-        $authUrl = 'https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query($params);
-        return $this->redirect($authUrl);
+        return $this->redirect($this->googleAuthUrl(null, OAuthLoginState::begin(OAuthLink::GOOGLE)));
     }
 
     /**
-     * Handle Google OAuth callback and process authentication
+     * Link Google to the signed-in account (profile, decision 2026-11-04). The OAuth "state" identifies the request.
+     * @return \yii\web\Response
+     * @throws \yii\web\NotFoundHttpException
+     */
+    public function actionConnectGoogle()
+    {
+        if (!OAuthLink::enabled(OAuthLink::GOOGLE)) {
+            throw new \yii\web\NotFoundHttpException('Google login is not available.');
+        }
+
+        return $this->redirect($this->googleAuthUrl(OAuthLink::beginConnect((int) Yii::$app->user->id, OAuthLink::GOOGLE)));
+    }
+
+    /**
+     * Handle Google OAuth callback: sign in, or finish linking when the state belongs to a profile connect request
      * @param string|null $code Authorization code from Google
+     * @param string $state OAuth state; only sent when linking from the profile
      * @return \yii\web\Response
      */
-    public function actionCallbackGoogle($code = null)
+    public function actionCallbackGoogle($code = null, $state = '')
     {
+        $login = Yii::$app->user->isGuest ? OAuthLoginState::take((string) $state, OAuthLink::GOOGLE) : null;
+        $connect = $login === null ? OAuthLink::takeConnect((string) $state) : null;
+        if ($login === null && $connect === null) {
+            return $this->connectFailed(OAuthLink::GOOGLE);
+        }
         if (!$code) {
-            Yii::$app->session->setFlash('error', 'Google authorization failed.');
-            return $this->redirect(['/auth/default/login']);
+            return $this->oauthFailed($connect, 'Google authorization failed.');
         }
 
         try {
-            $tokenData = $this->exchangeGoogleCode($code);
+            $tokenData = $this->exchangeGoogleCode($code, $login['verifier'] ?? null);
 
             if (!$tokenData || empty($tokenData['id_token'])) {
-                Yii::$app->session->setFlash('error', 'Failed to get Google tokens.');
-                return $this->redirect(['/auth/default/login']);
+                return $this->oauthFailed($connect, 'Failed to get Google tokens.');
             }
 
             $client = Yii::createObject([
@@ -192,16 +211,16 @@ class DefaultController extends WebController
 
             $userData = $client->verifyIdToken($tokenData['id_token']);
 
-            if (!$userData) {
-                Yii::$app->session->setFlash('error', 'Google authentication failed.');
-                return $this->redirect(['/auth/default/login']);
+            if (!$userData || ($login !== null && !OAuthLoginState::nonceMatches($login, $userData))) {
+                return $this->oauthFailed($connect, 'Google authentication failed.');
             }
 
-            return $this->processUserAuthentication($userData, 'Google');
+            return $connect !== null
+                ? $this->finishConnect($connect, $userData)
+                : $this->processUserAuthentication($userData, 'Google');
         } catch (\Exception $e) {
             Yii::error('Google OAuth error: ' . $e->getMessage(), 'oauth');
-            Yii::$app->session->setFlash('error', 'Google authentication error.');
-            return $this->redirect(['/auth/default/login']);
+            return $this->oauthFailed($connect, 'Google authentication error.');
         }
     }
 
@@ -212,24 +231,30 @@ class DefaultController extends WebController
      */
     public function actionLoginApple()
     {
-        if (!Yii::$app->setting->getValue('auth::appleEnabled')) {
+        if (!OAuthLink::enabled(OAuthLink::APPLE)) {
             throw new \yii\web\NotFoundHttpException('Apple login is not available.');
         }
 
-        $params = [
-            'client_id' => Yii::$app->setting->getValue('auth::appleClientId'),
-            'redirect_uri' => Yii::$app->urlManager->createAbsoluteUrl(['/auth/default/callback-apple']),
-            'response_type' => 'code',
-            'scope' => 'name email',
-            'response_mode' => 'form_post',
-        ];
-
-        $authUrl = 'https://appleid.apple.com/auth/authorize?' . http_build_query($params);
-        return $this->redirect($authUrl);
+        return $this->redirect($this->appleAuthUrl(null, OAuthLoginState::begin(OAuthLink::APPLE)));
     }
 
     /**
-     * Handle Apple OAuth callback and process authentication
+     * Link Apple to the signed-in account (profile). No scope is asked, so Apple returns with a GET ("query") instead
+     * of a cross-site POST: the browser then sends the session cookie and the user stays signed in.
+     * @return \yii\web\Response
+     * @throws \yii\web\NotFoundHttpException
+     */
+    public function actionConnectApple()
+    {
+        if (!OAuthLink::enabled(OAuthLink::APPLE)) {
+            throw new \yii\web\NotFoundHttpException('Apple login is not available.');
+        }
+
+        return $this->redirect($this->appleAuthUrl(OAuthLink::beginConnect((int) Yii::$app->user->id, OAuthLink::APPLE)));
+    }
+
+    /**
+     * Handle Apple OAuth callback: sign in (form_post), or finish linking from the profile (query, with state)
      * @return \yii\web\Response
      */
     public function actionCallbackApple()
@@ -237,45 +262,66 @@ class DefaultController extends WebController
         Yii::$app->response->headers->set('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
         Yii::$app->response->headers->set('Cross-Origin-Embedder-Policy', 'unsafe-none');
 
-        $code = Yii::$app->request->post('code');
-        $idToken = Yii::$app->request->post('id_token');
-        $user = Yii::$app->request->post('user');
-        $error = Yii::$app->request->post('error');
+        $request = Yii::$app->request;
+        $code = $request->post('code', $request->get('code'));
+        $idToken = $request->post('id_token');
+        $user = $request->post('user');
+        $error = $request->post('error', $request->get('error'));
+        $state = (string) $request->post('state', $request->get('state', ''));
+        $login = Yii::$app->user->isGuest ? OAuthLoginState::take($state, OAuthLink::APPLE) : null;
+        $connect = $login === null ? OAuthLink::takeConnect($state) : null;
+        if ($login === null && $connect === null) {
+            return $this->connectFailed(OAuthLink::APPLE);
+        }
 
         if ($error) {
-            Yii::$app->session->setFlash('error', 'Apple OAuth error: ' . $error);
-            return $this->redirect(['/auth/default/login']);
+            return $this->oauthFailed($connect, 'Apple OAuth error: ' . $error);
         }
 
         if (!$code && !$idToken) {
-            Yii::$app->session->setFlash('error', 'Apple authorization failed.');
-            return $this->redirect(['/auth/default/login']);
+            return $this->oauthFailed($connect, 'Apple authorization failed.');
         }
 
         try {
             if ($idToken) {
-                $userData = $this->processAppleIdToken($idToken, $user);
+                $userData = $this->processAppleIdToken($idToken, $user, $connect === null);
             } else {
                 $tokenData = $this->exchangeAppleCode($code);
                 if ($tokenData && isset($tokenData['id_token'])) {
-                    $userData = $this->processAppleIdToken($tokenData['id_token'], $user);
+                    $userData = $this->processAppleIdToken($tokenData['id_token'], $user, $connect === null);
                 } else {
                     throw new \Exception('Failed to get Apple ID token');
                 }
             }
 
-            if (!$userData) {
-                Yii::$app->session->setFlash('error', 'Apple authentication failed.');
-                return $this->redirect(['/auth/default/login']);
+            if (!$userData || ($login !== null && !OAuthLoginState::nonceMatches($login, $userData))) {
+                return $this->oauthFailed($connect, 'Apple authentication failed.');
             }
 
-            // Process user login/signup
-            return $this->processUserAuthentication($userData, 'Apple');
+            return $connect !== null
+                ? $this->finishConnect($connect, $userData)
+                : $this->processUserAuthentication($userData, 'Apple');
         } catch (\Exception $e) {
             Yii::error('Apple OAuth error: ' . $e->getMessage(), 'oauth');
-            Yii::$app->session->setFlash('error', 'Apple authentication error.');
-            return $this->redirect(['/auth/default/login']);
+            return $this->oauthFailed($connect, 'Apple authentication error.');
         }
+    }
+
+    /**
+     * Remove a linked Google/Apple identity from the signed-in account (profile).
+     * @return \yii\web\Response
+     */
+    public function actionDisconnect()
+    {
+        $provider = (string) Yii::$app->request->post('provider', '');
+        $known = in_array($provider, [OAuthLink::GOOGLE, OAuthLink::APPLE], true);
+        if ($known && OAuthLink::unlink((int) Yii::$app->user->id, $provider)) {
+            Yii::$app->session->addFlash('success', Module::t('{provider} is no longer linked to your account.', [
+                'provider' => OAuthLink::label($provider),
+            ]));
+        }
+
+        return $this->redirect([self::PROFILE_ROUTE]);
     }
 
     /**
@@ -441,7 +487,7 @@ class DefaultController extends WebController
      * @param string $code Authorization code from Google
      * @return array|null Token data or null on failure
      */
-    private function exchangeGoogleCode($code)
+    private function exchangeGoogleCode($code, ?string $codeVerifier = null)
     {
         $client = new \yii\httpclient\Client();
 
@@ -452,6 +498,9 @@ class DefaultController extends WebController
             'redirect_uri' => Yii::$app->urlManager->createAbsoluteUrl(['/auth/default/callback-google']),
             'grant_type' => 'authorization_code',
         ];
+        if ($codeVerifier !== null) {
+            $data['code_verifier'] = $codeVerifier;
+        }
 
         $response = $client->createRequest()
             ->setMethod('POST')
@@ -504,7 +553,7 @@ class DefaultController extends WebController
      * @param string|null $userParam Additional user data from Apple
      * @return array|false User data array or false on failure
      */
-    private function processAppleIdToken($idToken, $userParam = null)
+    private function processAppleIdToken($idToken, $userParam = null, bool $requireEmail = true)
     {
         $appleHelper = Yii::createObject([
             'class' => AppleJWTHelper::class,
@@ -515,14 +564,15 @@ class DefaultController extends WebController
 
         $tokenData = $appleHelper->decodeIdToken($idToken);
 
-        if (!$tokenData || empty($tokenData['email'])) {
+        if (!$tokenData || empty($tokenData['sub']) || ($requireEmail && empty($tokenData['email']))) {
             return false;
         }
 
         $userData = [
-            'apple_id' => $tokenData['sub'] ?? null,
-            'email' => $tokenData['email'],
+            'apple_id' => $tokenData['sub'],
+            'email' => $tokenData['email'] ?? '',
             'email_verified' => $tokenData['email_verified'] ?? false,
+            'nonce' => $tokenData['nonce'] ?? null,
             'name' => '',
             'given_name' => '',
             'family_name' => '',
@@ -554,6 +604,17 @@ class DefaultController extends WebController
     {
         $account = OAuthAccount::resolve($userData);
         $user = $account->user;
+        if ($user === null && $account->reason === OAuthAccount::REASON_CORPORATE_ONLY) {
+            AuthLogger::providerFailed($provider, (string) ($userData['email'] ?? ''), null, OAuthAccount::REASON_CORPORATE_ONLY);
+            AuthNotice::set('warning', (string) $account->message);
+            return $this->redirect(['/auth/default/login']);
+        }
+        if ($user === null && $account->reason === OAuthAccount::REASON_ACCOUNT_EXISTS) {
+            $email = (string) ($userData['email'] ?? '');
+            AuthLogger::providerFailed($provider, $email, null, AuthLog::REASON_ACCOUNT_EXISTS);
+            AuthNotice::set('warning', (string) $account->message);
+            return $this->redirect(['/auth/default/login']);
+        }
         if ($user === null && $account->reason === OAuthAccount::REASON_EMAIL_NOT_VERIFIED) {
             $message = ($account->signupRefused && Yii::$app->setting->getValue('auth::web_signup'))
                 ? OAuthAccount::unverifiedSignupWebMessage()
@@ -569,6 +630,7 @@ class DefaultController extends WebController
         }
 
         if ((int) $user->status !== User::STATUS_ACTIVE) {
+            AuthLogger::providerFailed($provider, (string) $user->email, $user, AccountStatus::of($user));
             $type = AccountStatus::of($user) === AccountStatus::INACTIVE ? 'warning' : 'info';
             AuthNotice::set($type, AccountStatus::inactiveMessage($user));
             return $this->redirect(['/auth/default/login']);
@@ -580,5 +642,87 @@ class DefaultController extends WebController
             ? Module::t('Account created and signed in with {provider}: {email}', $params)
             : Module::t('Signed in with {provider}: {email}', $params));
         return $this->goBack();
+    }
+
+    /**
+     * @param string|null $state profile connect request (OAuthLink::beginConnect)
+     * @param array|null $login sign-in request (OAuthLoginState::begin): state, nonce and PKCE challenge
+     */
+    private function googleAuthUrl(?string $state = null, ?array $login = null): string
+    {
+        $params = [
+            'client_id' => Yii::$app->setting->getValue('auth::googleClientId'),
+            'redirect_uri' => Yii::$app->urlManager->createAbsoluteUrl(['/auth/default/callback-google']),
+            'response_type' => 'code',
+            'scope' => 'email profile',
+            'access_type' => 'offline',
+            'prompt' => 'select_account',
+        ];
+        if ($state !== null) {
+            $params['state'] = $state;
+        }
+        if ($login !== null) {
+            $params += [
+                'state' => $login['state'], 'nonce' => $login['nonce'],
+                'code_challenge' => $login['challenge'], 'code_challenge_method' => 'S256',
+            ];
+        }
+
+        return 'https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query($params);
+    }
+
+    private function appleAuthUrl(?string $state = null, ?array $login = null): string
+    {
+        $params = [
+            'client_id' => Yii::$app->setting->getValue('auth::appleClientId'),
+            'redirect_uri' => Yii::$app->urlManager->createAbsoluteUrl(['/auth/default/callback-apple']),
+            'response_type' => 'code',
+        ];
+        $params += $state === null
+            ? ['scope' => 'name email', 'response_mode' => 'form_post', 'state' => $login['state'] ?? '', 'nonce' => $login['nonce'] ?? '']
+            : ['response_mode' => 'query', 'state' => $state];
+
+        return 'https://appleid.apple.com/auth/authorize?' . http_build_query($params);
+    }
+
+    /**
+     * Links the identity to the account that started the profile connect request, and returns to the profile.
+     */
+    private function finishConnect(array $connect, array $userData)
+    {
+        $error = OAuthLink::finishConnect($connect, $userData);
+        if ($error !== null) {
+            Yii::$app->session->addFlash('error', OAuthLink::errorMessage($error, $connect['provider']));
+        } else {
+            Yii::$app->session->addFlash('success', Module::t('{provider} is now linked to your account.', [
+                'provider' => OAuthLink::label($connect['provider']),
+            ]));
+        }
+
+        return $this->redirect([self::PROFILE_ROUTE]);
+    }
+
+    /**
+     * A callback whose connect request is missing or expired, or a signed-in user landing on the sign-in callback.
+     */
+    private function connectFailed(string $provider)
+    {
+        if (Yii::$app->user->isGuest) {
+            return $this->redirect(['/auth/default/login']);
+        }
+        Yii::$app->session->addFlash('error', OAuthLink::errorMessage(OAuthLink::ERROR_EXPIRED, $provider));
+
+        return $this->redirect([self::PROFILE_ROUTE]);
+    }
+
+    private function oauthFailed(?array $connect, string $message)
+    {
+        if ($connect !== null) {
+            Yii::$app->session->addFlash('error', OAuthLink::errorMessage(OAuthLink::ERROR_EXPIRED, $connect['provider']));
+            return $this->redirect([self::PROFILE_ROUTE]);
+        }
+        Yii::$app->session->setFlash('error', $message);
+
+        return $this->redirect(['/auth/default/login']);
     }
 }

@@ -5,6 +5,7 @@ namespace portalium\auth\models;
 use yii\base\Model;
 use yii\base\InvalidArgumentException;
 use portalium\auth\Module;
+use portalium\auth\components\LoginThrottle;
 use portalium\user\models\User;
 
 class ResetPasswordForm extends Model
@@ -29,7 +30,8 @@ class ResetPasswordForm extends Model
     {
         return [
             ['password', 'required'],
-            ['password', 'string', 'min' => 6],
+            ['password', 'string', 'min' => \portalium\user\components\PasswordPolicy::minLength(), 'max' => \portalium\user\components\PasswordPolicy::MAX_LENGTH],
+            ['password', \portalium\user\components\PasswordPolicy::class, 'userAttributes' => []],
         ];
     }
 
@@ -45,7 +47,11 @@ class ResetPasswordForm extends Model
         $user = $this->_user;
         $user->setPassword($this->password);
         $user->removePasswordResetToken();
+        if (!$user->save(false)) {
+            return false;
+        }
+        LoginThrottle::reset('', $user, LoginThrottle::requestIp());
 
-        return $user->save(false);
+        return true;
     }
 }

@@ -15,8 +15,12 @@ use portalium\user\models\User;
 use portalium\auth\components\OAuthClient;
 use portalium\auth\components\AppleJWTHelper;
 use portalium\auth\components\AccountStatus;
+use portalium\auth\components\AuthLogger;
+use portalium\auth\models\AuthLog;
 use portalium\auth\components\ApiAccess;
 use portalium\auth\components\OAuthAccount;
+use portalium\auth\components\OAuthLink;
+use portalium\auth\Module;
 use portalium\auth\models\PasswordResetRequestForm;
 use portalium\auth\models\ResetPasswordForm;
 use yii\base\InvalidParamException;
@@ -26,7 +30,7 @@ use portalium\helpers\RestHelper;
 
 #[Doc\Tag('Authentication', 'Sign in, sign up and password reset. These endpoints need no token; a successful sign-in returns one in `user.access_token`.')]
 #[Doc\Operation(
-    action: ['login', 'signup', 'google-signin', 'apple-signin', 'profile', 'request-password-reset', 'reset-password'],
+    action: ['login', 'signup', 'google-signin', 'apple-signin', 'connect', 'disconnect', 'profile', 'request-password-reset', 'reset-password'],
     audience: Doc\Operation::PUBLIC,
     method: 'POST',
 )]
@@ -57,6 +61,12 @@ class DefaultController extends Controller
         'message' => 'string',
         'approval_contact' => 'string?',
         'errors' => 'object - Field => messages',
+    ];
+    private const DOC_ACCOUNT_EXISTS = [
+        'success' => 'boolean',
+        'status' => 'enum:account_exists',
+        'message' => 'string - Sign in with the password, then link Google/Apple (`connect`)',
+        'is_new_user' => 'boolean',
     ];
     private const DOC_FAILED = ['success' => 'boolean', 'message' => 'string', 'errors' => 'object - Field => messages'];
     private const DOC_KEY_ERRORS = ['key' => 'string', 'message' => 'string'];
@@ -92,7 +102,7 @@ class DefaultController extends Controller
         // profile: Bearer API key authentication; the `novavision login` CLI uses this
         $behaviors['authenticator'] = [
             'class' => HttpBearerAuth::class,
-            'only' => ['profile'],
+            'only' => ['profile', 'connect', 'disconnect'],
         ];
         // The CORS preflight (OPTIONS) must be answered before authentication runs
         $behaviors = ['corsFilter' => $behaviors['corsFilter']] + $behaviors;
@@ -121,6 +131,7 @@ class DefaultController extends Controller
     #[Doc\Response(200, 'Signed in.', fields: self::DOC_SIGNED_IN)]
     #[Doc\Response(401, 'Wrong username or password.', fields: self::DOC_FAILED)]
     #[Doc\Response(403, 'Account not active, or API sign-in disabled by the administrator.', fields: self::DOC_REFUSED)]
+    #[Doc\Response(429, 'Too many failed attempts from this address; locked for auth::lock_minutes.', fields: self::DOC_FAILED)]
     public function actionLogin()
     {
         if (!ApiAccess::loginAllowed()) {
@@ -137,6 +148,14 @@ class DefaultController extends Controller
             ];
         }
 
+        if ($model->isLocked()) {
+            Yii::$app->response->statusCode = 429;
+            return [
+                'success' => false,
+                'message' => 'Too many failed attempts',
+                'errors' => $model->getErrors(),
+            ];
+        }
         if ($model->getAccountStatus() !== null) {
             Yii::$app->response->statusCode = 403;
             $message = (string) $model->getAccountMessage();
@@ -209,13 +228,15 @@ class DefaultController extends Controller
         summary: 'Sign in or sign up with Google',
         description: 'Send the ID token from Google Sign-In (web, Android or iOS client). A new account follows the site\'s approval setting, so it may '
             . 'come back as '
-            . '`pending_approval` without a token.',
+            . '`pending_approval` without a token. If an account with this email already exists and Google is not linked to it, the answer is 409 '
+            . '`account_exists`: the user signs in with the password and links Google with `connect`; later Google sign-ins go straight through.',
     )]
     #[Doc\Body(fields: ['id_token' => 'string - Google ID token'], required: ['id_token'])]
     #[Doc\Response(200, 'Signed in, or a new account was created.', fields: self::DOC_SIGNED_IN)]
     #[Doc\Response(400, 'id_token missing.', fields: self::DOC_DONE)]
     #[Doc\Response(401, 'Invalid token.', fields: self::DOC_DONE)]
     #[Doc\Response(403, 'Account not active, email not verified by Google, or sign-in/sign-up disabled.', fields: self::DOC_REFUSED)]
+    #[Doc\Response(409, 'An account with this email exists; sign in with the password and link it.', fields: self::DOC_ACCOUNT_EXISTS)]
     public function actionGoogleSignin()
     {
         if (!ApiAccess::loginAllowed()) {
@@ -231,17 +252,7 @@ class DefaultController extends Controller
         }
 
         try {
-            $client = Yii::createObject([
-                'class' => OAuthClient::class,
-                'clientId' => Yii::$app->setting->getValue('auth::googleClientId'),
-                'clientIds' => [
-                    Yii::$app->setting->getValue('auth::googleClientId'),
-                    'xxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com'
-                ],
-                'provider' => 'google',
-            ]);
-
-            $userData = $client->verifyIdToken($idToken);
+            $userData = $this->verifyGoogleIdToken($idToken);
 
             if (!$userData) {
                 Yii::$app->response->statusCode = 401;
@@ -270,7 +281,8 @@ class DefaultController extends Controller
      */
     #[Doc\Operation(
         summary: 'Sign in or sign up with Apple',
-        description: 'Send the identity token from Sign in with Apple. On the first sign-in Apple also gives the name; pass it in `user`.',
+        description: 'Send the identity token from Sign in with Apple. On the first sign-in Apple also gives the name; pass it in `user`. '
+            . 'An existing account that Apple is not linked to answers 409 `account_exists`, as with Google.',
     )]
     #[Doc\Body(fields: [
         'id_token' => 'string - Apple identity token',
@@ -283,6 +295,7 @@ class DefaultController extends Controller
     #[Doc\Response(400, 'id_token missing.', fields: self::DOC_DONE)]
     #[Doc\Response(401, 'Invalid token.', fields: self::DOC_DONE)]
     #[Doc\Response(403, 'Account not active or sign-in/sign-up disabled.', fields: self::DOC_REFUSED)]
+    #[Doc\Response(409, 'An account with this email exists; sign in with the password and link it.', fields: self::DOC_ACCOUNT_EXISTS)]
     public function actionAppleSignin()
     {
         if (!ApiAccess::loginAllowed()) {
@@ -320,6 +333,87 @@ class DefaultController extends Controller
                 'message' => 'Authentication failed'
             ];
         }
+    }
+
+    /**
+     * Link Google/Apple to the signed-in account (decision 2026-11-04): the mobile counterpart of the profile's [Link].
+     *
+     * @return array
+     */
+    #[Doc\Operation(
+        summary: 'Link Google or Apple to my account',
+        description: 'Send the ID token from Google Sign-In or Sign in with Apple while signed in (Bearer). Afterwards `google-signin` / `apple-signin` '
+            . 'signs in to this account. An account has at most one Google and one Apple identity.',
+    )]
+    #[Doc\Body(
+        fields: ['provider' => 'enum:google,apple', 'id_token' => 'string - Google ID token or Apple identity token'],
+        required: ['provider', 'id_token'],
+    )]
+    #[Doc\Response(200, 'Linked.', fields: self::DOC_DONE)]
+    #[Doc\Response(400, 'provider or id_token missing.', fields: self::DOC_DONE)]
+    #[Doc\Response(401, 'Invalid token.', fields: self::DOC_DONE)]
+    #[Doc\Response(409, 'The identity is linked to another account, or another identity of this provider is linked.', fields: [
+        'success' => 'boolean',
+        'status' => 'enum:identity_taken,provider_linked',
+        'message' => 'string',
+    ])]
+    public function actionConnect()
+    {
+        $provider = (string) Yii::$app->request->getBodyParam('provider', '');
+        $idToken = (string) Yii::$app->request->getBodyParam('id_token', '');
+        if (!in_array($provider, [OAuthLink::GOOGLE, OAuthLink::APPLE], true) || $idToken === '') {
+            Yii::$app->response->statusCode = 400;
+            return ['success' => false, 'message' => 'provider and id_token are required'];
+        }
+
+        try {
+            $userData = $provider === OAuthLink::GOOGLE ? $this->verifyGoogleIdToken($idToken) : $this->processAppleIdToken($idToken, null, false);
+        } catch (Exception $e) {
+            Yii::error('OAuth connect API error: ' . $e->getMessage(), 'oauth');
+            $userData = false;
+        }
+        $identity = $userData ? OAuthLink::identityOf($userData) : null;
+        if ($identity === null || $identity[0] !== $provider) {
+            Yii::$app->response->statusCode = 401;
+            return ['success' => false, 'message' => 'Invalid ' . OAuthLink::label($provider) . ' ID token'];
+        }
+        $error = OAuthLink::link((int) Yii::$app->user->id, $provider, $identity[1], $userData['email'] ?? null);
+        if ($error !== null) {
+            Yii::$app->response->statusCode = 409;
+            return ['success' => false, 'status' => $error, 'message' => OAuthLink::errorMessage($error, $provider)];
+        }
+
+        return [
+            'success' => true,
+            'message' => Module::t('{provider} is now linked to your account.', ['provider' => OAuthLink::label($provider)]),
+        ];
+    }
+
+    /**
+     * Remove a linked Google/Apple identity from the signed-in account.
+     *
+     * @return array
+     */
+    #[Doc\Operation(
+        summary: 'Unlink Google or Apple from my account',
+        description: 'Signed in (Bearer). Unlinking an identity that is not linked is not an error.',
+    )]
+    #[Doc\Body(fields: ['provider' => 'enum:google,apple'], required: ['provider'])]
+    #[Doc\Response(200, 'Unlinked.', fields: self::DOC_DONE)]
+    #[Doc\Response(400, 'provider missing.', fields: self::DOC_DONE)]
+    public function actionDisconnect()
+    {
+        $provider = (string) Yii::$app->request->getBodyParam('provider', '');
+        if (!in_array($provider, [OAuthLink::GOOGLE, OAuthLink::APPLE], true)) {
+            Yii::$app->response->statusCode = 400;
+            return ['success' => false, 'message' => 'provider is required'];
+        }
+        OAuthLink::unlink((int) Yii::$app->user->id, $provider);
+
+        return [
+            'success' => true,
+            'message' => Module::t('{provider} is no longer linked to your account.', ['provider' => OAuthLink::label($provider)]),
+        ];
     }
 
     /**
@@ -398,7 +492,7 @@ class DefaultController extends Controller
      * @return array
      */
     #[Doc\Operation(summary: 'Set a new password', description: '`token` is the one in the reset link.')]
-    #[Doc\Body(fields: ['token' => 'string - Token from the reset email', 'password' => 'string - At least 6 characters'], required: ['token', 'password'])]
+    #[Doc\Body(fields: ['token' => 'string - Token from the reset email', 'password' => 'string - At least 12 characters, not easy to guess'], required: ['token', 'password'])]
     #[Doc\Response(200, 'Password changed.', fields: self::DOC_DONE)]
     #[Doc\Response(422, 'Missing or invalid token or password.', fields: self::DOC_KEY_ERRORS, list: true)]
     public function actionResetPassword()
@@ -439,7 +533,22 @@ class DefaultController extends Controller
      * @param mixed $userParam
      * @return array|false
      */
-    private function processAppleIdToken($idToken, $userParam = null)
+    private function verifyGoogleIdToken(string $idToken)
+    {
+        $client = Yii::createObject([
+            'class' => OAuthClient::class,
+            'clientId' => Yii::$app->setting->getValue('auth::googleClientId'),
+            'clientIds' => [
+                Yii::$app->setting->getValue('auth::googleClientId'),
+                'xxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com'
+            ],
+            'provider' => 'google',
+        ]);
+
+        return $client->verifyIdToken($idToken);
+    }
+
+    private function processAppleIdToken($idToken, $userParam = null, bool $requireEmail = true)
     {
         $appleHelper = Yii::createObject([
             'class' => AppleJWTHelper::class,
@@ -449,13 +558,13 @@ class DefaultController extends Controller
         ]);
 
         $tokenData = $appleHelper->decodeIdToken($idToken);
-        if (!$tokenData || empty($tokenData['email'])) {
+        if (!$tokenData || empty($tokenData['sub']) || ($requireEmail && empty($tokenData['email']))) {
             return false;
         }
 
         $userData = [
-            'apple_id' => $tokenData['sub'] ?? null,
-            'email' => $tokenData['email'],
+            'apple_id' => $tokenData['sub'],
+            'email' => $tokenData['email'] ?? '',
             'email_verified' => $tokenData['email_verified'] ?? false,
             'name' => '',
             'given_name' => '',
@@ -488,7 +597,19 @@ class DefaultController extends Controller
     {
         $account = OAuthAccount::resolve($userData, ApiAccess::signupAllowed());
         $user = $account->user;
+        if ($user === null && $account->reason === OAuthAccount::REASON_ACCOUNT_EXISTS) {
+            $email = (string) ($userData['email'] ?? '');
+            AuthLogger::providerFailed($provider, $email, null, AuthLog::REASON_ACCOUNT_EXISTS);
+            Yii::$app->response->statusCode = 409;
+            return [
+                'success' => false,
+                'status' => OAuthAccount::REASON_ACCOUNT_EXISTS,
+                'message' => (string) $account->message,
+                'is_new_user' => false,
+            ];
+        }
         $refusals = [
+            OAuthAccount::REASON_CORPORATE_ONLY => OAuthAccount::REASON_CORPORATE_ONLY,
             OAuthAccount::REASON_EMAIL_NOT_VERIFIED => OAuthAccount::REASON_EMAIL_NOT_VERIFIED,
             OAuthAccount::REASON_SIGNUP_DISABLED => ApiAccess::SIGNUP_DISABLED,
         ];
@@ -512,6 +633,7 @@ class DefaultController extends Controller
         }
 
         if ((int) $user->status !== User::STATUS_ACTIVE) {
+            AuthLogger::providerFailed($provider, (string) $user->email, $user, AccountStatus::of($user));
             if (!$account->isNew) {
                 Yii::$app->response->statusCode = 403;
                 return ['success' => false] + $this->inactiveFields($user) + ['is_new_user' => false];

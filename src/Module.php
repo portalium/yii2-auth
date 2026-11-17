@@ -3,6 +3,7 @@
 namespace portalium\auth;
 
 use portalium\base\Event;
+use portalium\auth\components\AuthLogListener;
 use portalium\auth\components\TriggerActions;
 
 class Module extends \portalium\base\Module
@@ -17,6 +18,20 @@ class Module extends \portalium\base\Module
     const EVENT_ON_LOGIN = 'onLogin';
     const EVENT_ON_LOGOUT = 'onLogout';
     const EVENT_ON_SIGNUP = 'onSignup';
+
+    /**
+     * OAuth server for MCP clients (OauthController); the discovery documents live where the standards put them.
+     * Written as pattern/route arrays: portalium\web\Bootstrap appends the rules of all modules to one list, which
+     * drops "pattern => route" keys.
+     */
+    public $urlRules = [
+        ['pattern' => '.well-known/oauth-protected-resource/<path:.+>', 'route' => 'auth/oauth/protected-resource'],
+        ['pattern' => '.well-known/oauth-protected-resource', 'route' => 'auth/oauth/protected-resource'],
+        ['pattern' => '.well-known/oauth-authorization-server', 'route' => 'auth/oauth/metadata'],
+        ['pattern' => 'oauth/register', 'route' => 'auth/oauth/register'],
+        ['pattern' => 'oauth/authorize', 'route' => 'auth/oauth/authorize'],
+        ['pattern' => 'oauth/token', 'route' => 'auth/oauth/token'],
+    ];
 
     public $apiRules = [
         [
@@ -45,4 +60,9 @@ class Module extends \portalium\base\Module
             Event::on($this::className(), UserModule::EVENT_USER_DELETE_BEFORE, [new TriggerActions(), 'onUserDeleteBefore']);
         } 
     */
+
+    public function registerEvents()
+    {
+        AuthLogListener::register();
+    }
 }

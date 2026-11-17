@@ -19,6 +19,10 @@
         "google/apiclient": "^1.1",
 		"portalium/yii2-site": "*"
 	},
+	"suggest": {
+		"freedsx/ldap": "Needed only for LDAP / Active Directory identity providers (^0.9, plain PHP, no extension).",
+		"onelogin/php-saml": "Needed only for SAML identity providers (^4.2)."
+	},
 	"autoload" : {
 		"psr-4" : {
 			"portalium\\auth\\" : "src/"
