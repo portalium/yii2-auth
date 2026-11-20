@@ -8,7 +8,7 @@ class m260318_145931_auth_setting extends Migration
 {
     public function safeUp()
     {
-        $this->insert(SiteModule::$tablePrefix . 'setting', [
+        $this->insertSetting([
             'module' => 'site',
             'is_preference' => 0,
             'name' => 'auth::web_signup',
@@ -18,7 +18,7 @@ class m260318_145931_auth_setting extends Migration
             'config' => json_encode([1 => 'Show', 0 => 'Hide'])
         ]);
 
-        $this->insert(SiteModule::$tablePrefix . 'setting', [
+        $this->insertSetting([
             'module' => 'site',
             'is_preference' => 0,
             'name' => 'auth::web_login',
@@ -28,7 +28,7 @@ class m260318_145931_auth_setting extends Migration
             'config' => json_encode([1 => 'Show', 0 => 'Hide'])
         ]);
 
-        $this->insert(SiteModule::$tablePrefix . 'setting', [
+        $this->insertSetting([
             'module' => 'site',
             'is_preference' => 0,
             'name' => 'auth::api_signup',
@@ -38,7 +38,7 @@ class m260318_145931_auth_setting extends Migration
             'config' => json_encode([1 => 'Allow', 0 => 'Deny'])
         ]);
 
-        $this->insert(SiteModule::$tablePrefix . 'setting', [
+        $this->insertSetting([
             'module' => 'site',
             'is_preference' => 0,
             'name' => 'auth::api_login',
@@ -48,7 +48,7 @@ class m260318_145931_auth_setting extends Migration
             'config' => json_encode([1 => 'Allow', 0 => 'Deny'])
         ]);
 
-        $this->insert(SiteModule::$tablePrefix . 'setting', [
+        $this->insertSetting([
             'module' => 'site',
             'is_preference' => 0,
             'name' => 'auth::user_status',
@@ -58,7 +58,7 @@ class m260318_145931_auth_setting extends Migration
             'config' => json_encode([10 => 'Active', 20 => 'Passive'])
         ]);
 
-        $this->insert(SiteModule::$tablePrefix . 'setting', [
+        $this->insertSetting([
             'module' => 'site',
             'is_preference' => 0,
             'name' => 'auth::layout',
@@ -77,7 +77,7 @@ class m260318_145931_auth_setting extends Migration
             ])
         ]);
 
-        $this->insert(SiteModule::$tablePrefix . 'setting', [
+        $this->insertSetting([
             'module' => 'site',
             'is_preference' => 0,
             'name' => 'auth::login_layout',
@@ -90,7 +90,7 @@ class m260318_145931_auth_setting extends Migration
             ])
         ]);
 
-        $this->insert(SiteModule::$tablePrefix . 'setting', [
+        $this->insertSetting([
             'module' => 'site',
             'is_preference' => 0,
             'name' => 'auth::login_image',
@@ -107,6 +107,18 @@ class m260318_145931_auth_setting extends Migration
                 ]
             ])
         ]);
+    }
+
+    /**
+     * portalium/yii2-site already seeds auth::layout; a fresh install would get the row twice.
+     */
+    private function insertSetting(array $columns)
+    {
+        $exists = (new \yii\db\Query())->from(SiteModule::$tablePrefix . 'setting')
+            ->where(['name' => $columns['name']])->exists($this->db);
+        if (!$exists) {
+            $this->insert(SiteModule::$tablePrefix . 'setting', $columns);
+        }
     }
 
     public function safeDown()
