@@ -90,6 +90,10 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
                 'class' => 'auth-sl-input',
                 'placeholder' => '••••••••',
             ]) ?>
+            <?= $form->field($model, 'password_confirm', ['options' => ['class' => 'mb-2']])->passwordInput([
+                'class' => 'auth-sl-input',
+                'placeholder' => '••••••••',
+            ]) ?>
             <?= Html::submitButton(Module::t('Reset Password'), [
                 'class' => 'btn bg-white border border-2 border-success text-dark fw-bold w-100 mb-2',
                 'name' => 'reset-button',
@@ -162,6 +166,10 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
             ]); ?>
             <?= $form->field($model, 'password')->passwordInput([
                 'autofocus' => true,
+                'class' => 'auth-input',
+                'placeholder' => '••••••••',
+            ]) ?>
+            <?= $form->field($model, 'password_confirm')->passwordInput([
                 'class' => 'auth-input',
                 'placeholder' => '••••••••',
             ]) ?>

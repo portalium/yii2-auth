@@ -471,6 +471,7 @@ class DefaultController extends WebController
         } catch (InvalidArgumentException $e) {
             throw new BadRequestHttpException($e->getMessage());
         }
+        $model->scenario = ResetPasswordForm::SCENARIO_WEB;
 
         if ($model->load(Yii::$app->request->post()) && $model->validate() && $model->resetPassword()) {
             Yii::$app->session->addFlash('success', Module::t('New password saved.'));

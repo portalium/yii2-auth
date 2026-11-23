@@ -314,4 +314,12 @@ return [
     'Read' => 'Oku',
     'Accept and continue' => 'Onayla ve devam et',
     'Sign out' => 'Çıkış yap',
+    'New Password' => 'Yeni Şifre',
+    'Confirm New Password' => 'Yeni Şifre (Tekrar)',
+    'Reset Your Password' => 'Şifrenizi Sıfırlayın',
+    'Choose a new password for your account.' => 'Hesabınız için yeni bir şifre belirleyin.',
+    'Choose a new password for your account' => 'Hesabınız için yeni bir şifre belirleyin',
+    'Reset Password' => 'Şifreyi Sıfırla',
+    'Back to Log in' => 'Girişe dön',
+    'Back to Login' => 'Girişe dön',
 ];
