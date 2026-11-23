@@ -105,6 +105,7 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
             </p>
         </div>
     </div>
+    <?= $this->render('_feature_boxes', ['layout' => 'single', 'authBundle' => $authBundle, 'boxGradient' => $boxGradient]) ?>
 </div>
 
 <?php else: ?>
@@ -122,6 +123,7 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
             <h2 class="auth-hero-title"><?= Html::encode($_heroTitle) ?></h2>
             <p class="auth-hero-subtitle"><?= Html::encode($_heroSubtitle) ?></p>
         </div>
+        <?= $this->render('_feature_boxes', ['layout' => 'split', 'authBundle' => $authBundle, 'boxGradient' => $boxGradient]) ?>
         <?php if (!empty($_visibleIntegrations)): ?>
         <div class="auth-badges">
             <div class="auth-badges-list">
