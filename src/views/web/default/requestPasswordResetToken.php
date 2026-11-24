@@ -75,8 +75,8 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
         </div>
         <!-- Centered Card -->
         <div class="bg-white rounded-4 shadow-lg px-4 py-4" style="min-width:320px;max-width:400px;width:100%;">
-            <h3 class="card-title text-center mb-1 fw-bold text-dark">Password Recovery</h3>
-            <p class="text-center text-muted mb-3">Enter your email to receive recovery instructions.</p>
+            <h3 class="card-title text-center mb-1 fw-bold text-dark"><?= Module::t('Password Recovery') ?></h3>
+            <p class="text-center text-muted mb-3"><?= Module::t('Enter your email to receive recovery instructions.') ?></p>
             <?php $form = ActiveForm::begin([
                 'id' => 'request-password-reset-form',
                 'fieldConfig' => [
@@ -89,17 +89,18 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
                 'class' => 'auth-sl-input',
                 'placeholder' => Module::t('name@company.com'),
             ]) ?>
-            <?= Html::submitButton('Send Reset Link', [
+            <?= Html::submitButton(Module::t('Send Reset Link'), [
                 'class' => 'btn bg-white border border-2 border-success text-dark fw-bold w-100 mb-2',
                 'name' => 'reset-button',
                 'style' => 'border-radius: 0.375rem; padding: 0.7rem 1rem; font-size: 1rem;',
             ]) ?>
             <?php ActiveForm::end(); ?>
             <p class="auth-sl-footer-text mb-0">
-                <?= Html::a('Back to Log in', ['/auth/default/login'], ['class' => 'auth-sl-link']) ?>
+                <?= Html::a(Module::t('Back to Log in'), ['/auth/default/login'], ['class' => 'auth-sl-link']) ?>
             </p>
         </div>
     </div>
+    <?= $this->render('_feature_boxes', ['layout' => 'single', 'authBundle' => $authBundle, 'boxGradient' => $boxGradient]) ?>
 </div>
 
 <?php else: ?>
@@ -117,6 +118,7 @@ $boxGradient = "linear-gradient(135deg, {$color1} 0%, {$color2} 100%)";
             <h2 class="auth-hero-title"><?= Html::encode($_heroTitle) ?></h2>
             <p class="auth-hero-subtitle"><?= Html::encode($_heroSubtitle) ?></p>
         </div>
+        <?= $this->render('_feature_boxes', ['layout' => 'split', 'authBundle' => $authBundle, 'boxGradient' => $boxGradient]) ?>
         <?php if (!empty($_visibleIntegrations)): ?>
         <div class="auth-badges">
             <div class="auth-badges-list">

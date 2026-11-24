@@ -10,7 +10,10 @@ use portalium\user\models\User;
 
 class ResetPasswordForm extends Model
 {
+    const SCENARIO_WEB = 'web';
+
     public $password;
+    public $password_confirm;
 
     private $_user;
 
@@ -32,13 +35,16 @@ class ResetPasswordForm extends Model
             ['password', 'required'],
             ['password', 'string', 'min' => \portalium\user\components\PasswordPolicy::minLength(), 'max' => \portalium\user\components\PasswordPolicy::MAX_LENGTH],
             ['password', \portalium\user\components\PasswordPolicy::class, 'userAttributes' => []],
+            ['password_confirm', 'required', 'on' => self::SCENARIO_WEB],
+            ['password_confirm', 'compare', 'compareAttribute' => 'password', 'on' => self::SCENARIO_WEB, 'message' => Module::t('Passwords do not match.')],
         ];
     }
 
     public function attributeLabels()
     {
         return [
-            'password' => Module::t('Password'),
+            'password' => Module::t('New Password'),
+            'password_confirm' => Module::t('Confirm New Password'),
         ];
     }
 
