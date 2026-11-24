@@ -13,6 +13,8 @@ class Module extends \portalium\base\Module
     
     public static $name = 'Auth';
 
+    
+    public static $icon = 'key';
     public static $description = 'Auth Module';
 
     // Auth events
